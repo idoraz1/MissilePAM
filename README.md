@@ -43,6 +43,8 @@
 4.  **התקן את הדפדפנים של Playwright:**
     ```bash
     playwright install chromium
+    #במידה ולא עובד אפשר לנסות
+    pip install chromium
     ```
 
 5.  **הרץ את המערכת:**

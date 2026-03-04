@@ -1,0 +1,41 @@
+{
+    "areas": [
+        "קריית אתא"
+    ],
+    "speakers": [
+        "סלון display",
+        "Ido"
+    ],
+    "play_startup_sound": false,
+    "volumes": {
+        "immediate": 0.5,
+        "uav": 0.5,
+        "early": 0.5,
+        "all_clear": 0.5
+    },
+    "texts": {
+        "alert_immediate": "טילים ורקטות, {area}. ",
+        "alert_uav": "חדירת כלי טיס עוין, {area}.",
+        "alert_early": "התרעה מקדימה באזור {area}. להתכונן לכניסה למרחב המוגן.",
+        "all_clear": "חזרה לשגרה. ניתן לצאת מהמרחב המוגן."
+    },
+    "toggles": {
+        "enable_immediate": true,
+        "enable_uav": true,
+        "enable_early": true,
+        "enable_all_clear": true
+    },
+    "proximity_radius_km": 15,
+    "esp32": {
+        "volume_alert": 25,
+        "volume_uav": 25,
+        "volume_early": 25,
+        "volume_all_clear": 20,
+        "volume_startup": 1,
+        "file_alert_immediate": 1,
+        "file_all_clear": 2,
+        "file_startup": 3,
+        "file_uav": 4,
+        "file_alert_early": 5
+    }
+}

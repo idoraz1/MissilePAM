@@ -11,6 +11,8 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 CITIES_FILE = os.path.join(DATA_DIR, "cities.json")
 CITIES_POLYGONS_FILE = os.path.join(DATA_DIR, "cities_polygons.json")
 
+PUBLIC_MODE = os.environ.get("PUBLIC_MODE", "").lower() == "true"
+
 def load_config():
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:

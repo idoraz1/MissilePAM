@@ -21,6 +21,8 @@ CORS(app)
 
 @app.route('/')
 def serve_dashboard():
+    if config.PUBLIC_MODE:
+        return send_from_directory(config.FRONTEND_DIR, 'public_index.html')
     return send_from_directory(config.FRONTEND_DIR, 'index.html')
 
 @app.route('/audio/<path:filename>')
@@ -31,6 +33,8 @@ def serve_audio(filename):
 def handle_settings():
     if request.method == 'GET':
         return jsonify(config.load_config())
+    if config.PUBLIC_MODE:
+        return jsonify({"success": False, "message": "מערכת ציבורית - אין הרשאה"}), 403
     new_config = request.json
     config.save_config(new_config)
     broadcaster.generate_audio_files(new_config)
@@ -49,6 +53,8 @@ def get_devices():
 
 @app.route('/api/test', methods=['POST'])
 def test_audio():
+    if config.PUBLIC_MODE:
+        return jsonify({"success": False, "message": "מערכת ציבורית - אין הרשאה"}), 403
     data     = request.json
     filename = ("alert_immediate.mp3" if data.get("type") == "alert"
                 else f"{data.get('type', 'connected')}.mp3")
@@ -57,6 +63,8 @@ def test_audio():
 
 @app.route('/api/test_esp', methods=['POST'])
 def test_esp_hardware():
+    if config.PUBLIC_MODE:
+        return jsonify({"success": False, "message": "מערכת ציבורית - אין הרשאה"}), 403
     def run_esp_test():
         state.current_status["status"]       = "1"
         state.current_status["active_area"]  = "בדיקת מערכת (ESP32)"
@@ -72,6 +80,8 @@ def test_esp_hardware():
 
 @app.route('/api/clear_alerts', methods=['POST'])
 def clear_alerts():
+    if config.PUBLIC_MODE:
+        return jsonify({"success": False, "message": "מערכת ציבורית - אין הרשאה"}), 403
     with state.active_polygons_lock:
         state.active_polygons.clear()
     state.current_status["status"]       = "0"
@@ -86,12 +96,16 @@ def clear_alerts():
 
 @app.route('/api/esp_command')
 def esp_command_api():
+    if config.PUBLIC_MODE:
+        return jsonify({"command": "idle", "file": 0, "volume": 0})
     cmd = dict(state.esp_command)
     state.esp_command = {"command": "idle", "file": 0, "volume": 25}
     return jsonify(cmd)
 
 @app.route('/api/esp_play', methods=['POST'])
 def esp_play():
+    if config.PUBLIC_MODE:
+        return jsonify({"success": False, "message": "מערכת ציבורית - אין הרשאה"}), 403
     data        = request.json
     file_num    = int(data.get("file", 1))
     volume      = int(data.get("volume", 25))
@@ -100,6 +114,8 @@ def esp_play():
 
 @app.route('/api/esp_sd_zip')
 def esp_sd_zip():
+    if config.PUBLIC_MODE:
+        return jsonify({"success": False, "message": "מערכת ציבורית - אין הרשאה"}), 403
     conf        = config.load_config()
     esp_cfg     = conf.get("esp32", {})
     zip_buffer  = io.BytesIO()
@@ -121,6 +137,8 @@ def esp_sd_zip():
 
 @app.route('/api/esp_sd_status')
 def esp_sd_status():
+    if config.PUBLIC_MODE:
+        return jsonify([])
     conf    = config.load_config()
     esp_cfg = conf.get("esp32", {})
     file_mapping = {

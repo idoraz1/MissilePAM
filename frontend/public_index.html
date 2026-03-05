@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>מערכת ניהול התרעות חכמה</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        html, body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a; color: #f8fafc;
+            width: 100%; height: 100vh; margin: 0; padding: 0; overflow: hidden;
+        }
+        @keyframes pulse-red    { 0%,100%{background-color:#7f1d1d} 50%{background-color:#ef4444} }
+        @keyframes pulse-orange { 0%,100%{background-color:#7c2d12} 50%{background-color:#f97316} }
+        @keyframes pulse-purple { 0%,100%{background-color:#4c1d95} 50%{background-color:#7c3aed} }
+        .emergency-mode-red    { animation: pulse-red    1s infinite; color:white; }
+        .emergency-mode-orange { animation: pulse-orange 2s infinite; color:white; }
+        .emergency-mode-purple { animation: pulse-purple 2s infinite; color:white; }
+        input[type=range] { accent-color: #3b82f6; }
+        .map-container { z-index: 10; }
+        .emergency-border-red    { border:4px solid #ef4444; box-shadow:0 0 20px #ef4444; }
+        .emergency-border-orange { border:4px solid #f97316; box-shadow:0 0 20px #f97316; }
+        .emergency-border-purple { border:4px solid #a855f7; box-shadow:0 0 20px #a855f7; }
+        .custom-scrollbar::-webkit-scrollbar       { width:6px; height:6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background:rgba(15,23,42,.5); border-radius:4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background:rgba(59,130,246,.5); border-radius:4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background:rgba(59,130,246,.8); }
+        .mode-card {
+            position:relative; border-radius:.75rem; padding:.6rem .75rem;
+            border-width:1px; border-style:solid; display:flex; align-items:flex-start;
+            gap:.6rem; transition:all .4s;
+        }
+        .mode-card.active-card { box-shadow:0 0 18px var(--glow-color,#3b82f6); }
+        .mode-card-dot { width:10px; height:10px; border-radius:9999px; flex-shrink:0; margin-top:4px; }
+        .mode-card.active-card .mode-card-dot { animation:dot-pulse 1.2s infinite; }
+        @keyframes dot-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.4)} }
+        .mode-card.active-card::before {
+            content:''; position:absolute; inset:-2px; border-radius:.8rem;
+            border:2px solid var(--glow-color,#3b82f6); pointer-events:none;
+        }
+        .sd-file-row { display:flex; align-items:center; gap:.5rem; padding:.5rem .75rem; border-radius:.5rem; background:rgba(15,23,42,.5); border:1px solid rgba(71,85,105,.4); }
+        .sd-file-row .sd-badge { font-family:monospace; font-size:.7rem; padding:.15rem .4rem; border-radius:.3rem; background:#1e3a5f; color:#93c5fd; border:1px solid #1d4ed8; flex-shrink:0; }
+        @keyframes toast-in  { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes toast-out { from{opacity:1;transform:translateY(0)} to{opacity:0;transform:translateY(20px)} }
+        .toast-enter { animation: toast-in  .3s ease forwards; }
+        .toast-exit  { animation: toast-out .3s ease forwards; }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const API_BASE = "/api";
+
+// ── צבעי פוליגון לפי סוג התרעה ──
+const POLYGON_STYLES = {
+    EMERGENCY:     { color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.35, weight: 3, dashArray: null },
+    EARLY_WARNING: { color: "#a855f7", fillColor: "#a855f7", fillOpacity: 0.20, weight: 2, dashArray: "6,6" },
+    UAV:           { color: "#f97316", fillColor: "#f97316", fillOpacity: 0.30, weight: 3, dashArray: "4,4" },
+    PENDING:       { color: "#facc15", fillColor: "#facc15", fillOpacity: 0.20, weight: 2, dashArray: "8,4" },
+};
+
+function getPolygonStyle(polygonType) {
+    return POLYGON_STYLES[polygonType] || POLYGON_STYLES.EMERGENCY;
+}
+
+const MAP_LEGEND = [
+    { color: "#a855f7", label: "התרעה מוקדמת",         hint: "התכונן — עדיין יש זמן" },
+    { color: "#ef4444", label: "אזעקה פעילה",           hint: "היכנס מיד למרחב מוגן!" },
+    { color: "#f97316", label: "כטב\"ם עוין",            hint: "היכנס למרחב מוגן!" },
+    { color: "#facc15", label: "ממתין לסיום אירוע",     hint: "הישאר במקלט עד לאישור" },
+    { color: "#3b82f6", label: "אזור מעקב",             hint: "האזור שהגדרת למעקב" },
+];
+
+const CITIES_COORDS = {
+    "ירושלים":{lat:31.7683,lng:35.2137},"תל אביב":{lat:32.0853,lng:34.7818},
+    "חיפה":{lat:32.7940,lng:34.9896},"ראשון לציון":{lat:31.9730,lng:34.7925},
+    "פתח תקווה":{lat:32.0840,lng:34.8878},"אשדוד":{lat:31.8014,lng:34.6435},
+    "נתניה":{lat:32.3215,lng:34.8532},"באר שבע":{lat:31.2518,lng:34.7913},
+    "בני ברק":{lat:32.0849,lng:34.8352},"חולון":{lat:32.0158,lng:34.7874},
+    "רמת גן":{lat:32.0823,lng:34.8107},"אשקלון":{lat:31.6693,lng:34.5715},
+    "רחובות":{lat:31.8944,lng:34.8113},"בת ים":{lat:32.0132,lng:34.7480},
+    "בית שמש":{lat:31.7470,lng:34.9881},"כפר סבא":{lat:32.1713,lng:34.9080},
+    "הרצליה":{lat:32.1624,lng:34.8447},"חדרה":{lat:32.4340,lng:34.9197},
+    "מודיעין":{lat:31.8998,lng:35.0075},"לוד":{lat:31.9510,lng:34.8881},
+    "רמלה":{lat:31.9272,lng:34.8710},"רעננה":{lat:32.1848,lng:34.8713},
+    "מודיעין עילית":{lat:31.9333,lng:35.0415},"הוד השרון":{lat:32.1500,lng:34.8911},
+    "קריית גת":{lat:31.6033,lng:34.7645},"קריית אתא":{lat:32.8052,lng:35.1054},
+    "קריית מוצקין":{lat:32.8333,lng:35.0667},"קריית ביאליק":{lat:32.8333,lng:35.0833},
+    "קריית ים":{lat:32.8333,lng:35.0667},"נהריה":{lat:33.0081,lng:34.9256},
+    "עכו":{lat:32.9331,lng:35.0827},"כרמיאל":{lat:32.9149,lng:34.9254},
+    "צפת":{lat:33.3293,lng:35.4965},"קריית שמונה":{lat:33.2073,lng:35.5695},
+    "מטולה":{lat:33.2801,lng:35.5794},"אילת":{lat:29.5577,lng:34.9519},
+    "שדרות":{lat:31.5256,lng:34.5943},"נתיבות":{lat:31.4172,lng:34.5878},
+    "אופקים":{lat:31.3129,lng:34.6206},"אריאל":{lat:32.1046,lng:35.1745},
+    "קצרין":{lat:32.9918,lng:35.6946},"מעלה אדומים":{lat:31.7820,lng:35.3032},
+    "ביתר עילית":{lat:31.7000,lng:35.1167},"טבריה":{lat:32.7897,lng:35.5249},
+    "עפולה":{lat:32.6105,lng:35.2869},"אור עקיבא":{lat:32.5000,lng:34.9167},
+    "ראש פינה":{lat:32.9667,lng:35.5333},"יבנה":{lat:31.8753,lng:34.7397},
+    "נס ציונה":{lat:31.9274,lng:34.7979},"מבשרת ציון":{lat:31.8000,lng:35.1500},
+    "גבעת זאב":{lat:31.8500,lng:35.1667},"תקוע":{lat:31.6000,lng:35.2167},
+    "שילת":{lat:31.9167,lng:35.0167},"באר יעקב":{lat:31.9333,lng:34.8333},
+    "יהוד":{lat:31.8833,lng:34.8833},"שלומי":{lat:33.0760,lng:35.1432},
+    "זרעית":{lat:33.0805,lng:35.2678},"חצור הגלילית":{lat:32.9818,lng:35.5539},
+    "גוש עציון":{lat:31.6500,lng:35.1333},"שומרון":{lat:32.2000,lng:35.2500},
+    "עוטף עזה":{lat:31.4287,lng:34.4697},"גולן":{lat:33.0000,lng:35.7500}
+};
+
+function getCoordsForCity(name){
+    for(const[k,v]of Object.entries(CITIES_COORDS)) if(name.includes(k)||k.includes(name)) return v;
+    return null;
+}
+
+const THREAT_MODES = [
+    { id:"ROUTINE",       label:"שגרה",             icon:"fa-check-circle",        dotColor:"#22c55e", borderColor:"#16a34a", bgColor:"rgba(21,128,61,.10)",  glowColor:"#22c55e", textColor:"#86efac", description:"אין התרעות פעילות באזורך." },
+    { id:"ALL_CLEAR",     label:"סיום אירוע",        icon:"fa-shield-check",        dotColor:"#4ade80", borderColor:"#16a34a", bgColor:"rgba(21,128,61,.15)",  glowColor:"#4ade80", textColor:"#86efac", description:"האירוע הסתיים. ניתן לצאת מהמרחב המוגן בהדרגה." },
+    { id:"CLOSE_THREAT",  label:"עירני",             icon:"fa-eye",                 dotColor:"#fb923c", borderColor:"#ea580c", bgColor:"rgba(234,88,12,.13)",  glowColor:"#f97316", textColor:"#fdba74", description:"שיגורים בקרבתך. הישאר קרוב למרחב מוגן." },
+    { id:"EARLY_WARNING", label:"התרעה מוקדמת",     icon:"fa-clock",               dotColor:"#c084fc", borderColor:"#9333ea", bgColor:"rgba(147,51,234,.13)", glowColor:"#a855f7", textColor:"#e9d5ff", description:"איום ארוך-טווח. זמן התארגנות מורחב." },
+    { id:"EMERGENCY",     label:"אזעקה מידית",       icon:"fa-radiation",           dotColor:"#f87171", borderColor:"#dc2626", bgColor:"rgba(220,38,38,.18)",  glowColor:"#ef4444", textColor:"#fca5a5", description:"אזעקה פעילה באזור המעקב שלך. היכנס מיד למרחב המוגן!" },
+];
+
+const ESP_TEST_BUTTONS = [
+    { label:'אזעקה מידית',  file:1, volume:30, colorClass:'bg-red-900 hover:bg-red-700 border-red-700 text-red-200',             icon:'fa-rocket', volKey:'volume_alert',    fileKey:'file_alert_immediate' },
+    { label:'חזרה לשגרה',   file:2, volume:20, colorClass:'bg-green-900 hover:bg-green-700 border-green-700 text-green-200',     icon:'fa-check',  volKey:'volume_all_clear', fileKey:'file_all_clear' },
+    { label:'מערכת מוכנה',  file:3, volume:20, colorClass:'bg-slate-700 hover:bg-slate-600 border-slate-500 text-slate-200',     icon:'fa-plug',   volKey:'volume_startup',   fileKey:'file_startup' },
+    { label:'כטב"ם עוין',   file:4, volume:30, colorClass:'bg-orange-900 hover:bg-orange-700 border-orange-700 text-orange-200', icon:'fa-plane',  volKey:'volume_uav',       fileKey:'file_uav' },
+    { label:'התרעה מוקדמת', file:5, volume:25, colorClass:'bg-purple-900 hover:bg-purple-700 border-purple-700 text-purple-200', icon:'fa-clock',  volKey:'volume_early',     fileKey:'file_alert_early' },
+];
+
+/* ── Toast ── */
+function Toast({ toasts }) {
+    return (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 items-center pointer-events-none">
+            {toasts.map(t=>(
+                <div key={t.id} className={`px-5 py-3 rounded-2xl shadow-2xl text-sm font-bold flex items-center gap-2
+                    ${t.type==='success'?'bg-green-700 text-white':t.type==='error'?'bg-red-700 text-white':'bg-slate-700 text-white'}
+                    ${t.exiting?'toast-exit':'toast-enter'}`}>
+                    <i className={`fas ${t.type==='success'?'fa-check-circle':t.type==='error'?'fa-times-circle':'fa-info-circle'}`}></i>
+                    {t.message}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+/* ── StatusModesPanel ── */
+function StatusModesPanel({ threatLevel }) {
+    return (
+        <div className="bg-slate-800/90 backdrop-blur rounded-2xl p-3 md:p-4 border border-slate-700 shadow-md flex flex-col gap-2 z-20 shrink-0">
+            <div className="flex items-center gap-2 mb-1">
+                <i className="fas fa-layer-group text-blue-400 text-sm"></i>
+                <span className="text-xs md:text-sm font-bold text-slate-200 tracking-wide">מצבי כוננות</span>
+            </div>
+            {THREAT_MODES.map(mode=>{
+                const isActive = mode.id === threatLevel;
+                return (
+                    <div key={mode.id} className={`mode-card${isActive?' active-card':''}`}
+                        style={{backgroundColor:isActive?mode.bgColor:'rgba(15,23,42,.45)',borderColor:isActive?mode.borderColor:'rgba(71,85,105,.5)','--glow-color':mode.glowColor,opacity:isActive?1:.52}}>
+                        <div className="mode-card-dot" style={{backgroundColor:isActive?mode.dotColor:'#475569'}}></div>
+                        <i className={`fas ${mode.icon} text-sm mt-0.5 flex-shrink-0`} style={{color:isActive?mode.dotColor:'#64748b'}}></i>
+                        <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-bold leading-tight" style={{color:isActive?mode.textColor:'#94a3b8'}}>
+                                {mode.label}
+                                {isActive&&(
+                                    <span className="mr-1.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+                                        style={{backgroundColor:mode.dotColor+'33',color:mode.dotColor,border:`1px solid ${mode.dotColor}55`}}>
+                                        פעיל
+                                    </span>
+                                )}
+                            </span>
+                            <span className="text-[10px] leading-snug mt-0.5" style={{color:isActive?mode.textColor+'cc':'#475569'}}>
+                                {mode.description}
+                            </span>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+/* ── MapLegend ── */
+function MapLegend() {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="absolute bottom-3 left-3 z-[1000]">
+            <button onClick={()=>setOpen(o=>!o)}
+                className="bg-slate-900/90 backdrop-blur border border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 flex items-center gap-2 shadow-lg hover:bg-slate-800 transition">
+                <i className="fas fa-map-legend fa-map text-blue-400"></i>
+                מקרא מפה
+                <i className={`fas fa-chevron-${open?'down':'up'} text-slate-400 text-[10px]`}></i>
+            </button>
+            {open && (
+                <div className="absolute bottom-10 left-0 bg-slate-900/95 backdrop-blur border border-slate-600 rounded-2xl p-3 shadow-2xl w-56">
+                    <p className="text-[10px] text-slate-400 font-bold mb-2 uppercase tracking-wider">צבעי פוליגון</p>
+                    {MAP_LEGEND.map((item,i)=>(
+                        <div key={i} className="flex items-start gap-2 mb-2">
+                            <div className="w-3 h-3 rounded-full mt-0.5 flex-shrink-0 border border-white/20"
+                                style={{backgroundColor:item.color, boxShadow:`0 0 6px ${item.color}88`}}></div>
+                            <div>
+                                <p className="text-xs font-semibold text-slate-200 leading-tight">{item.label}</p>
+                                <p className="text-[10px] text-slate-400 leading-tight">{item.hint}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ── MapView ── */
+function MapView({ threatLevel, allAlerts=[], isActiveTab, monitoredAreas=[], radiusKm=10, onClearAlerts, hasPendingPolygons }) {
+    const mapRef      = useRef(null);
+    const instanceRef = useRef(null);
+    const polygonLayersRef = useRef([]);
+    const circleLayersRef  = useRef([]);
+    const radiusRef     = useRef([]);
+    const [ready, setReady] = useState(false);
+
+    useEffect(()=>{
+        if(isActiveTab && mapRef.current && !instanceRef.current){
+            const t = setTimeout(()=>{
+                try {
+                    const map = L.map(mapRef.current).setView([31.5,34.8516],7);
+                    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap'}).addTo(map);
+                    instanceRef.current = map;
+                    setReady(true);
+                    setTimeout(()=>instanceRef.current?.invalidateSize(),500);
+                } catch(e){ console.error(e); }
+            },100);
+            return ()=>clearTimeout(t);
+        }
+        return ()=>{
+            if(!isActiveTab && instanceRef.current){
+                instanceRef.current.remove(); instanceRef.current=null; setReady(false);
+            }
+        };
+    },[isActiveTab]);
+
+    useEffect(()=>{
+        if(isActiveTab && instanceRef.current){
+            const t=setTimeout(()=>instanceRef.current?.invalidateSize(),300);
+            return()=>clearTimeout(t);
+        }
+    },[isActiveTab]);
+
+    useEffect(()=>{
+        if(!instanceRef.current||!isActiveTab||!ready) return;
+        radiusRef.current.forEach(l=>{try{instanceRef.current.removeLayer(l)}catch(e){}});
+        radiusRef.current=[];
+        (monitoredAreas||[]).forEach(area=>{
+            const c=getCoordsForCity(area); if(!c) return;
+            const circ=L.circle([c.lat,c.lng],{color:'#3b82f6',fillColor:'#3b82f6',fillOpacity:.07,weight:2,dashArray:'8,8',radius:radiusKm*1000}).addTo(instanceRef.current);
+            circ.bindPopup(`<b>אזור מעקב: ${area}</b><br>רדיוס: ${radiusKm} ק"מ`);
+            radiusRef.current.push(circ);
+            const dot=L.circleMarker([c.lat,c.lng],{color:'#3b82f6',fillColor:'#60a5fa',fillOpacity:.9,weight:3,radius:8}).addTo(instanceRef.current);
+            dot.bindPopup(`<b>${area}</b><br>אזור מעקב`);
+            radiusRef.current.push(dot);
+        });
+    },[monitoredAreas,radiusKm,isActiveTab,ready]);
+
+    useEffect(()=>{
+        if(!instanceRef.current||!isActiveTab||!ready) return;
+
+        // ניקוי כל השכבות הקודמות
+        polygonLayersRef.current.forEach(l=>{try{instanceRef.current.removeLayer(l)}catch(e){}});
+        circleLayersRef.current.forEach(l=>{try{instanceRef.current.removeLayer(l)}catch(e){}});
+        polygonLayersRef.current = [];
+        circleLayersRef.current = [];
+
+        // צייר כל התראה - פוליגון או עיגול fallback
+        allAlerts.forEach(a=>{
+            const style = getPolygonStyle(a.polygon_type || 'EMERGENCY');
+            const typeLabel = {
+                EMERGENCY:     "אזעקה פעילה",
+                EARLY_WARNING: "התרעה מוקדמת",
+                UAV:           "כטב\"ם עוין",
+                PENDING:       "ממתין לסיום אירוע"
+            }[a.polygon_type] || "התרעה";
+
+            // אם יש פוליגון - צייר פוליגון
+            if(a.polygon && Array.isArray(a.polygon) && a.polygon.length > 0){
+                const polyOpts = {
+                    color:       style.color,
+                    fillColor:   style.fillColor,
+                    fillOpacity: style.fillOpacity,
+                    weight:      style.weight,
+                };
+                if(style.dashArray) polyOpts.dashArray = style.dashArray;
+
+                const poly = L.polygon(a.polygon, polyOpts).addTo(instanceRef.current);
+                poly.bindPopup(`<b>${a.name}</b><br>${typeLabel}`);
+                polygonLayersRef.current.push(poly);
+            }
+            // אחרת - צייר עיגול fallback
+            else if(a.lat && a.lng){
+                const circleOpts = {
+                    color:       style.color,
+                    fillColor:   style.fillColor,
+                    fillOpacity: style.fillOpacity,
+                    weight:      style.weight,
+                    radius:      4000
+                };
+                if(style.dashArray) circleOpts.dashArray = style.dashArray;
+
+                const c = L.circle([a.lat,a.lng], circleOpts).addTo(instanceRef.current);
+                c.bindPopup(`<b>${a.name}</b><br>${typeLabel}`);
+                circleLayersRef.current.push(c);
+            }
+        });
+    },[allAlerts,isActiveTab,ready]);
+
+    let borderClass="border border-slate-700";
+    if(threatLevel==="EMERGENCY")     borderClass="emergency-border-red";
+    if(threatLevel==="EARLY_WARNING") borderClass="emergency-border-purple";
+    if(threatLevel==="CLOSE_THREAT")  borderClass="emergency-border-orange";
+
+    const activeCount = allAlerts.filter(a=>a.polygon_type!=='PENDING').length;
+    const pendingCount = allAlerts.filter(a=>a.polygon_type==='PENDING').length;
+
+    return (
+        <div className={`absolute inset-0 rounded-2xl overflow-hidden pointer-events-auto shadow-inner ${borderClass}`}>
+            {isActiveTab && <div ref={mapRef} className="absolute inset-0 map-container"></div>}
+
+            {/* badge סטטוס */}
+            <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
+                <div className="bg-slate-900/80 backdrop-blur-md border border-slate-600 rounded-xl p-2 shadow-lg flex items-center gap-2 pointer-events-none">
+                    <div className={`w-3 h-3 rounded-full ${activeCount>0?'bg-red-500 animate-ping':pendingCount>0?'bg-yellow-400':'bg-green-500'}`}></div>
+                    <span className="text-xs md:text-sm font-bold">
+                        {activeCount>0 ? `${activeCount} התרעות פעילות`
+                         : pendingCount>0 ? `ממתין לסיום אירוע (${pendingCount})`
+                         : 'הארץ מוגנת ושקטה'}
+                    </span>
+                </div>
+            </div>
+
+            {/* מקרא */}
+            {isActiveTab && <MapLegend/>}
+
+            {threatLevel==="EMERGENCY"&&isActiveTab&&(
+                <div className="absolute inset-0 bg-red-600/20 z-[400] pointer-events-none flex items-center justify-center">
+                    <i className="fas fa-bullseye text-red-500 text-9xl md:text-[15rem] opacity-30 animate-ping"></i>
+                </div>
+            )}
+            {threatLevel==="EARLY_WARNING"&&isActiveTab&&(
+                <div className="absolute inset-0 bg-purple-600/20 z-[400] pointer-events-none flex items-center justify-center">
+                    <i className="fas fa-clock text-purple-400 text-9xl md:text-[15rem] opacity-30 animate-pulse"></i>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function MobileBottomSheet({
+    threatLevel, statusBoxClass, statusIcon, statusTitle, statusSub,
+    safeRoomTimeLeft, formatTime, areasInput, setAreasInput,
+    handleDraftChange, draftConfig
+}) {
+    const [expanded, setExpanded] = useState(false);
+    const isAlert = threatLevel==="EMERGENCY"||threatLevel==="EARLY_WARNING"||threatLevel==="CLOSE_THREAT";
+
+    useEffect(()=>{
+        if(isAlert) setExpanded(true);
+        else setExpanded(false);
+    },[isAlert]);
+
+    const handleColor =
+        threatLevel==="EMERGENCY"    ? "bg-red-500" :
+        threatLevel==="EARLY_WARNING"? "bg-purple-500" :
+        threatLevel==="CLOSE_THREAT" ? "bg-orange-500" :
+        threatLevel==="ALL_CLEAR"    ? "bg-green-500" :
+        "bg-slate-500";
+
+    return (
+        <div className={`md:hidden absolute bottom-0 left-0 right-0 z-[500] flex flex-col transition-all duration-300 ease-in-out
+            ${expanded ? 'max-h-[70vh]' : 'max-h-[52px]'}`}>
+
+            <button
+                onClick={()=>setExpanded(o=>!o)}
+                className={`flex items-center justify-between px-4 py-3 rounded-t-2xl border-t border-x
+                    border-slate-600 bg-slate-900/95 backdrop-blur-md shadow-2xl w-full`}>
+                <div className="flex items-center gap-2">
+                    <div className={`w-2.5 h-2.5 rounded-full ${handleColor} ${isAlert?'animate-pulse':''}`}></div>
+                    <span className="text-sm font-bold text-slate-100">{statusTitle}</span>
+                    {isAlert&&(
+                        <span className="text-[10px] text-slate-400 font-normal truncate max-w-[140px]">{statusSub}</span>
+                    )}
+                </div>
+                <i className={`fas fa-chevron-${expanded?'down':'up'} text-slate-400 text-sm transition-transform duration-300`}></i>
+            </button>
+
+            <div className="bg-slate-900/95 backdrop-blur-md border-x border-slate-700 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3 pb-4">
+
+                <div className={`p-3 rounded-xl shadow-lg transition-all duration-500 border ${statusBoxClass} flex items-center gap-3`}>
+                    <i className={`fas ${statusIcon} text-3xl shrink-0 drop-shadow-md`}></i>
+                    <div>
+                        <h2 className="text-base font-extrabold leading-tight">{statusTitle}</h2>
+                        <p className="text-[11px] opacity-90 leading-tight">{statusSub}</p>
+                    </div>
+                </div>
+
+                {threatLevel==="EMERGENCY"&&safeRoomTimeLeft>0&&(
+                    <div className="bg-black/40 rounded-xl p-3 border border-white/20 text-center">
+                        <p className="text-[10px] uppercase tracking-widest opacity-70 mb-0.5">זמן שהייה בממ"ד</p>
+                        <div className="text-3xl font-mono font-bold text-red-300">
+                            {formatTime(safeRoomTimeLeft)}
+                        </div>
+                    </div>
+                )}
+
+                <div className="bg-slate-800 rounded-xl p-3 border border-slate-700">
+                    <div className="flex items-center gap-2 mb-2">
+                        <i className="fas fa-crosshairs text-blue-400 text-sm"></i>
+                        <span className="text-xs font-bold">אזורי מעקב</span>
+                    </div>
+                    <textarea value={areasInput}
+                        onChange={e=>{
+                            setAreasInput(e.target.value);
+                            handleDraftChange('areas',e.target.value.split(',').map(a=>a.trim()).filter(a=>a!==""));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white text-xs focus:border-blue-500 focus:outline-none resize-none"
+                        rows="1" placeholder="חיפה, אשדוד..."/>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                        {(draftConfig.areas||[]).map((area,i)=>(
+                            <span key={i} className="bg-blue-900/40 text-blue-200 border border-blue-700/50 px-2 py-0.5 rounded-full text-[10px]">{area}</span>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">מצבי כוננות</p>
+                    <div className="grid grid-cols-1 gap-1.5">
+                        {THREAT_MODES.map(mode=>{
+                            const isActive = mode.id === threatLevel;
+                            return (
+                                <div key={mode.id}
+                                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all"
+                                    style={{
+                                        backgroundColor: isActive ? mode.bgColor : 'transparent',
+                                        opacity: isActive ? 1 : 0.45,
+                                        border: isActive ? `1px solid ${mode.borderColor}` : '1px solid transparent'
+                                    }}>
+                                    <div className="w-2 h-2 rounded-full flex-shrink-0"
+                                        style={{backgroundColor: isActive ? mode.dotColor : '#475569'}}></div>
+                                    <i className={`fas ${mode.icon} text-xs w-4 text-center`}
+                                        style={{color: isActive ? mode.dotColor : '#64748b'}}></i>
+                                    <span className="text-[11px] font-semibold flex-1"
+                                        style={{color: isActive ? mode.textColor : '#94a3b8'}}>
+                                        {mode.label}
+                                    </span>
+                                    {isActive&&(
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                                            style={{backgroundColor:mode.dotColor+'33', color:mode.dotColor}}>
+                                            פעיל
+                                        </span>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* ══════════════════════════════════════════
+   APP
+══════════════════════════════════════════ */
+function App() {
+    const [activeTab, setActiveTab]             = useState('home');
+    const [isSidebarOpen, setIsSidebarOpen]     = useState(false);
+    const [isSimpleMode, setIsSimpleMode]       = useState(false);
+    const [config, setConfig]                   = useState(null);
+    const [draftConfig, setDraftConfig]         = useState(null);
+    const [areasInput, setAreasInput]           = useState("");
+    const [status, setStatus]                   = useState({
+        status:"0", active_area:"", alert_type:"",
+        threat_level:"ROUTINE", all_alerts:[], close_threat:false
+    });
+    const [loading, setLoading]                 = useState(true);
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [safeRoomTimeLeft, setSafeRoomTimeLeft]   = useState(0);
+    const [toasts, setToasts]                   = useState([]);
+    const prevThreatRef = useRef("ROUTINE");
+
+    const showToast = useCallback((message, type='info')=>{
+        const id = Date.now();
+        setToasts(p=>[...p,{id,message,type,exiting:false}]);
+        setTimeout(()=>{
+            setToasts(p=>p.map(t=>t.id===id?{...t,exiting:true}:t));
+            setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),350);
+        },3000);
+    },[]);
+
+    useEffect(()=>{
+        fetchSettings();
+        if(Notification.permission!=="granted") Notification.requestPermission();
+    },[]);
+
+    useEffect(()=>{
+        const iv=setInterval(fetchStatus,1000);
+        return()=>clearInterval(iv);
+    },[]);
+
+    useEffect(()=>{
+        const prev = prevThreatRef.current;
+        const curr = status.threat_level;
+        prevThreatRef.current = curr;
+        if(curr==="EMERGENCY"&&prev!=="EMERGENCY"){
+            setSafeRoomTimeLeft(600);
+            if(Notification.permission==="granted")
+                new Notification("אזעקה מידית!",{body:`היכנס מיד למרחב המוגן באזור ${status.active_area}`});
+        }
+        if(curr==="EARLY_WARNING"&&prev!=="EARLY_WARNING"){
+            if(Notification.permission==="granted")
+                new Notification("התרעה מוקדמת",{body:`זמן התארגנות מורחב באזור ${status.active_area}`});
+        }
+        if((curr==="ROUTINE"||curr==="ALL_CLEAR")&&prev==="EMERGENCY")
+            setSafeRoomTimeLeft(0);
+    },[status.threat_level]);
+
+    useEffect(()=>{
+        if(safeRoomTimeLeft<=0) return;
+        const t=setInterval(()=>setSafeRoomTimeLeft(p=>p>0?p-1:0),1000);
+        return()=>clearInterval(t);
+    },[safeRoomTimeLeft]);
+
+    const fetchSettings = async () => {
+        try {
+            const res  = await fetch(`${API_BASE}/settings`);
+            const data = await res.json();
+            const localConf = JSON.parse(localStorage.getItem('publicConfig') || '{}');
+            const safe = {
+                areas:              localConf.areas || data.areas || [],
+                proximity_radius_km: localConf.proximity_radius_km ?? data.proximity_radius_km ?? 10
+            };
+            setConfig(safe); setDraftConfig(safe);
+            setAreasInput(safe.areas.join(", "));
+            setLoading(false);
+        } catch(e){ console.error(e); }
+    };
+
+    const fetchStatus = async () => {
+        try {
+            const res  = await fetch(`${API_BASE}/status`);
+            const data = await res.json();
+            let threat = "ROUTINE";
+            const alerts = data.all_alerts || [];
+
+            if(data.status==="2"){
+                threat = "ALL_CLEAR";
+            } else if(data.status==="1"){
+                threat = (data.alert_type&&data.alert_type.includes("התרעה מקדימה"))
+                    ? "EARLY_WARNING" : "EMERGENCY";
+            } else if(data.close_threat&&alerts.length>0){
+                threat = "CLOSE_THREAT";
+            } else {
+                data.close_threat = false;
+            }
+
+            setStatus({...data, threat_level:threat, all_alerts:alerts, close_threat:data.close_threat||false});
+        } catch(e){}
+    };
+
+    const handleDraftChange=(key,value)=>{
+        setDraftConfig(p=>({...p,[key]:value})); setHasUnsavedChanges(true);
+        if (key === 'areas' || key === 'proximity_radius_km') {
+            const publicConfig = JSON.parse(localStorage.getItem('publicConfig') || '{}');
+            publicConfig[key] = value;
+            localStorage.setItem('publicConfig', JSON.stringify(publicConfig));
+        }
+    };
+    const formatTime=s=>`${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+
+    if(loading||!draftConfig)
+        return <div className="flex justify-center items-center h-screen text-2xl text-blue-400 bg-slate-900"><i className="fas fa-spin fa-circle-notch mr-3"></i> טוען מערכת...</div>;
+
+    let bgClass='bg-slate-900', statusBoxClass='bg-slate-800 border-slate-700';
+    let statusIcon='fa-check-circle text-green-400', statusTitle='שגרה מבורכת', statusSub='לא זוהו איומים במדינה';
+
+    if(status.threat_level==="EMERGENCY"){
+        bgClass='emergency-mode-red';
+        statusBoxClass='bg-red-600 border-white md:border-4 border-2 shadow-[0_0_30px_#ef4444]';
+        statusIcon='fa-radiation text-white animate-spin'; statusTitle='אזעקה מידית!';
+        statusSub=`${status.alert_type} באזור ${status.active_area}`;
+    } else if(status.threat_level==="EARLY_WARNING"){
+        bgClass='emergency-mode-purple';
+        statusBoxClass='bg-purple-800 border-purple-300 md:border-4 border-2 shadow-[0_0_30px_#7c3aed]';
+        statusIcon='fa-clock text-purple-200 animate-pulse'; statusTitle='התרעה מוקדמת';
+        statusSub=`זמן התארגנות מורחב לאזור ${status.active_area}`;
+    } else if(status.threat_level==="CLOSE_THREAT"){
+        bgClass='emergency-mode-orange';
+        statusBoxClass='bg-orange-600 border-white md:border-4 border-2';
+        statusIcon='fa-eye text-white animate-pulse'; statusTitle='מצב עירני';
+        statusSub='שיגורים בקרבתך. הישאר קרוב למרחב מוגן.';
+    } else if(status.threat_level==="ALL_CLEAR"){
+        statusBoxClass='bg-green-800 border-green-500';
+        statusIcon='fa-shield-check text-green-300'; statusTitle='האירוע הסתיים';
+        statusSub=`ניתן לצאת מהמרחב המוגן (${status.active_area})`;
+    }
+
+    const hasPendingPolygons = (status.all_alerts||[]).some(a=>a.polygon_type==='PENDING');
+    const hasActivePolygons  = (status.all_alerts||[]).length > 0;
+
+    return (
+        <div className={`fixed inset-0 flex flex-col md:flex-row transition-colors duration-1000 ${bgClass} z-0 overflow-hidden`}>
+            <Toast toasts={toasts}/>
+
+            {isSimpleMode && (
+                <button onClick={()=>setIsSimpleMode(false)}
+                    className="absolute top-4 left-4 z-[9999] bg-slate-800/60 hover:bg-slate-700/80 text-white w-12 h-12 rounded-full flex items-center justify-center border border-slate-600 shadow-2xl backdrop-blur-md transition-all text-xl"
+                    title="חזור למערכת ניהול">
+                    <i className="fas fa-compress"></i>
+                </button>
+            )}
+
+            {!isSimpleMode && (
+                <div className="md:hidden flex flex-shrink-0 justify-between items-center p-3 bg-slate-900 z-30 shadow-lg border-b border-slate-700">
+                    <div className="flex items-center gap-3">
+                        <button onClick={()=>setIsSidebarOpen(true)} className="text-2xl text-slate-300 hover:text-white px-2">
+                            <i className="fas fa-bars"></i>
+                        </button>
+                <h1 className="text-lg font-bold">מערכת התרעות <span className="text-blue-400">פומבית</span></h1>
+                    </div>
+                </div>
+            )}
+
+            {!isSimpleMode&&isSidebarOpen&&<div className="fixed inset-0 bg-black/60 z-40 md:hidden" onClick={()=>setIsSidebarOpen(false)}></div>}
+
+            {!isSimpleMode && (
+                <aside className={`fixed top-0 bottom-0 right-0 z-50 w-64 md:w-72 bg-slate-900 border-l border-slate-700 shadow-2xl transition-transform duration-300 ${isSidebarOpen?'translate-x-0':'translate-x-full'} md:relative md:translate-x-0 flex flex-col flex-shrink-0`}>
+                    <div className="p-4 md:p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800 md:bg-transparent">
+                        <div className="hidden md:flex items-center gap-3">
+                            <i className="fas fa-shield-alt text-3xl text-blue-500"></i>
+                            <h1 className="text-xl font-bold">מערכת <span className="text-blue-400">פומבית</span></h1>
+                        </div>
+                        <div className="font-bold text-lg text-slate-200 md:hidden">תפריט ניווט</div>
+                        <button className="md:hidden text-2xl text-slate-400" onClick={()=>setIsSidebarOpen(false)}><i className="fas fa-times"></i></button>
+                    </div>
+
+                    <nav className="flex-1 p-3 md:p-4 space-y-2 overflow-y-auto">
+                        {[
+                            {id:'home',     icon:'fa-bolt',      label:'חדר מצב ומפה'},
+                        ].map(tab=>(
+                            <button key={tab.id} onClick={()=>{setActiveTab(tab.id);setIsSidebarOpen(false);}}
+                                className={`w-full text-right p-4 rounded-xl flex items-center gap-4 transition-all ${activeTab===tab.id?'bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-md':'text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent'}`}>
+                                <i className={`fas ${tab.icon} text-xl w-6 text-center`}></i>
+                                <span className="font-bold text-lg">{tab.label}</span>
+                            </button>
+                        ))}
+                        <div className="pt-4 mt-2 border-t border-slate-700/50">
+                            <button onClick={()=>{setActiveTab('home');setIsSimpleMode(true);setIsSidebarOpen(false);}}
+                                className="w-full text-right p-4 rounded-xl flex items-center gap-4 transition-all text-slate-400 hover:bg-slate-800 hover:text-white border border-transparent">
+                                <i className="fas fa-expand text-xl w-6 text-center"></i>
+                                <span className="font-bold text-lg">תצוגת מסך מלא</span>
+                            </button>
+                        </div>
+                    </nav>
+
+                    <div className="p-4 md:p-6 border-t border-slate-700 bg-slate-800/40">
+                        <div className="flex items-center gap-3 bg-slate-900 p-3 rounded-xl border border-slate-700 justify-center">
+                            <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e] animate-pulse"></div>
+                            <span className="text-sm font-semibold text-slate-300">מחובר לשרת</span>
+                        </div>
+                    </div>
+                </aside>
+            )}
+
+            <main className={`flex-1 flex flex-col min-w-0 min-h-0 bg-transparent relative z-10 transition-colors duration-1000 p-2 md:p-4 gap-2 md:gap-4 overflow-hidden ${isSimpleMode?'w-full h-full p-4':''}`}>
+
+                {activeTab==='home'&&(
+                    <div className="flex flex-col md:flex-row w-full h-full min-h-0 gap-2 md:gap-4 relative flex-1">
+
+                        <div className="hidden md:flex flex-col gap-2 md:gap-3 md:w-[340px] shrink-0 min-h-0 overflow-y-auto custom-scrollbar">
+                            <div className={`p-4 md:p-6 rounded-2xl shadow-xl transition-all duration-500 border ${statusBoxClass} flex flex-row items-center md:flex-col md:text-center z-20 shrink-0`}>
+                                <i className={`fas ${statusIcon} text-4xl md:text-6xl md:mb-4 shrink-0 ml-4 md:ml-0 drop-shadow-md`}></i>
+                                <div className="flex-1">
+                                    <h2 className="text-xl md:text-2xl font-extrabold tracking-tight leading-none mb-1">{statusTitle}</h2>
+                                    <p className="text-xs md:text-sm font-medium opacity-90 leading-tight">{statusSub}</p>
+                                </div>
+                            </div>
+
+                            {status.threat_level==="EMERGENCY"&&safeRoomTimeLeft>0&&(
+                                <div className="bg-black/40 backdrop-blur rounded-2xl p-2 md:p-5 border border-white/20 text-center shrink-0 z-20 shadow-xl">
+                                    <p className="text-[11px] md:text-sm uppercase tracking-widest opacity-80 mb-1">זמן שהייה בממ"ד</p>
+                                    <div className="text-4xl md:text-5xl font-mono font-bold tracking-wider text-red-300 drop-shadow-[0_0_10px_rgba(252,165,165,.7)]">
+                                        {formatTime(safeRoomTimeLeft)}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="bg-slate-800/90 backdrop-blur rounded-2xl p-3 md:p-4 border border-slate-700 shadow-md shrink-0 flex flex-col gap-2 z-20">
+                                <div className="flex items-center gap-2">
+                                    <i className="fas fa-crosshairs text-blue-400"></i>
+                                    <span className="text-sm font-bold">אזורי התרעה ממוקדים</span>
+                                </div>
+                                <textarea value={areasInput}
+                                    onChange={e=>{
+                                        setAreasInput(e.target.value);
+                                        handleDraftChange('areas',e.target.value.split(',').map(a=>a.trim()).filter(a=>a!==""));
+                                    }}
+                                    className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white text-xs md:text-sm focus:border-blue-500 focus:outline-none resize-none custom-scrollbar"
+                                    rows="1" placeholder="הקלד: חיפה, אשדוד..."></textarea>
+                                <div className="flex flex-wrap gap-1 mt-1 max-h-[60px] overflow-y-auto custom-scrollbar">
+                                    {(draftConfig.areas||[]).map((area,i)=>(
+                                        <span key={i} className="bg-blue-900/40 text-blue-200 border border-blue-700/50 px-2 py-0.5 rounded-full text-[10px]">{area}</span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <StatusModesPanel threatLevel={status.threat_level}/>
+                        </div>
+
+                        <div className="flex-1 relative bg-slate-800 rounded-2xl shadow-xl w-full min-h-0 min-w-0 z-10">
+                            <MapView
+                                threatLevel={status.threat_level}
+                                allAlerts={status.all_alerts}
+                                isActiveTab={activeTab==='home'}
+                                monitoredAreas={draftConfig.areas||[]}
+                                radiusKm={draftConfig.proximity_radius_km||10}
+                                hasPendingPolygons={hasPendingPolygons}
+                            />
+                        </div>
+
+                        <MobileBottomSheet
+                            threatLevel={status.threat_level}
+                            statusBoxClass={statusBoxClass}
+                            statusIcon={statusIcon}
+                            statusTitle={statusTitle}
+                            statusSub={statusSub}
+                            safeRoomTimeLeft={safeRoomTimeLeft}
+                            formatTime={formatTime}
+                            areasInput={areasInput}
+                            setAreasInput={setAreasInput}
+                            handleDraftChange={handleDraftChange}
+                            draftConfig={draftConfig}
+                        />
+                    </div>
+                )}
+
+            </main>
+        </div>
+    );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+</body>
+</html>

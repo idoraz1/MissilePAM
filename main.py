@@ -12,10 +12,16 @@ if __name__ == "__main__":
     load_cities_from_file()
     load_cities_polygons()
     init_config = load_config()
-    generate_audio_files(init_config)
+
+    from src.config import PUBLIC_MODE
+    if not PUBLIC_MODE:
+        generate_audio_files(init_config)
 
     threading.Thread(target=polygon_timeout_loop, daemon=True).start()
     threading.Thread(target=run_flask, daemon=True).start()
     time.sleep(2)
-    setup_active_chromecasts(init_config)
+
+    if not PUBLIC_MODE:
+        setup_active_chromecasts(init_config)
+
     asyncio.run(run_playwright())

@@ -9,7 +9,8 @@ import src.broadcaster as broadcaster
 
 async def run_playwright():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        headless_mode = config.PUBLIC_MODE or getattr(config, 'HEADLESS_MODE', True)
+        browser = await p.chromium.launch(headless=headless_mode)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
         page = await context.new_page()

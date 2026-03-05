@@ -220,8 +220,9 @@ function MapLegend() {
 function MapView({ threatLevel, allAlerts=[], isActiveTab, monitoredAreas=[], radiusKm=10, onClearAlerts, hasPendingPolygons }) {
     const mapRef      = useRef(null);
     const instanceRef = useRef(null);
-    const alertsRef   = useRef([]);
-    const radiusRef   = useRef([]);
+    const polygonLayersRef = useRef([]);
+    const circleLayersRef  = useRef([]);
+    const radiusRef     = useRef([]);
     const [ready, setReady] = useState(false);
 
     useEffect(()=>{
@@ -268,13 +269,39 @@ function MapView({ threatLevel, allAlerts=[], isActiveTab, monitoredAreas=[], ra
 
     useEffect(()=>{
         if(!instanceRef.current||!isActiveTab||!ready) return;
-        alertsRef.current.forEach(l=>{try{instanceRef.current.removeLayer(l)}catch(e){}});
-        alertsRef.current=[];
         
-        // צייר תמיד את כל הפוליגונים שהשרת שלח
+        // ניקוי כל השכבות הקודמות
+        polygonLayersRef.current.forEach(l=>{try{instanceRef.current.removeLayer(l)}catch(e){}});
+        circleLayersRef.current.forEach(l=>{try{instanceRef.current.removeLayer(l)}catch(e){}});
+        polygonLayersRef.current = [];
+        circleLayersRef.current = [];
+        
+        // צייר כל התראה - פוליגון או עיגול fallback
         allAlerts.forEach(a=>{
-            if(a.lat&&a.lng){
-                const style = getPolygonStyle(a.polygon_type || 'EMERGENCY');
+            const style = getPolygonStyle(a.polygon_type || 'EMERGENCY');
+            const typeLabel = {
+                EMERGENCY:     "אזעקה פעילה",
+                EARLY_WARNING: "התרעה מוקדמת",
+                UAV:           "כטב\"ם עוין",
+                PENDING:       "ממתין לסיום אירוע"
+            }[a.polygon_type] || "התרעה";
+            
+            // אם יש פוליגון - צייר פוליגון
+            if(a.polygon && Array.isArray(a.polygon) && a.polygon.length > 0){
+                const polyOpts = {
+                    color:       style.color,
+                    fillColor:   style.fillColor,
+                    fillOpacity: style.fillOpacity,
+                    weight:      style.weight,
+                };
+                if(style.dashArray) polyOpts.dashArray = style.dashArray;
+                
+                const poly = L.polygon(a.polygon, polyOpts).addTo(instanceRef.current);
+                poly.bindPopup(`<b>${a.name}</b><br>${typeLabel}`);
+                polygonLayersRef.current.push(poly);
+            }
+            // אחרת - צייר עיגול fallback
+            else if(a.lat && a.lng){
                 const circleOpts = {
                     color:       style.color,
                     fillColor:   style.fillColor,
@@ -283,15 +310,10 @@ function MapView({ threatLevel, allAlerts=[], isActiveTab, monitoredAreas=[], ra
                     radius:      4000
                 };
                 if(style.dashArray) circleOpts.dashArray = style.dashArray;
+                
                 const c = L.circle([a.lat,a.lng], circleOpts).addTo(instanceRef.current);
-                const typeLabel = {
-                    EMERGENCY:     "אזעקה פעילה",
-                    EARLY_WARNING: "התרעה מוקדמת",
-                    UAV:           "כטב\"ם עוין",
-                    PENDING:       "ממתין לסיום אירוע"
-                }[a.polygon_type] || "התרעה";
                 c.bindPopup(`<b>${a.name}</b><br>${typeLabel}`);
-                alertsRef.current.push(c);
+                circleLayersRef.current.push(c);
             }
         });
     },[allAlerts,isActiveTab,ready]);
@@ -319,7 +341,7 @@ function MapView({ threatLevel, allAlerts=[], isActiveTab, monitoredAreas=[], ra
                     </span>
                 </div>
 
-                {/* כפתור ניקוי חירום — מוצג רק כשיש פוליגונים */}
+                {/* כפתור ניקוי חירום */}
                 {(activeCount>0||pendingCount>0) && (
                     <button onClick={onClearAlerts}
                         className="bg-slate-900/90 backdrop-blur border border-red-700/60 rounded-xl px-3 py-2 text-xs font-bold text-red-300 flex items-center gap-2 shadow-lg hover:bg-red-900/40 transition pointer-events-auto">
@@ -554,6 +576,7 @@ function ESP32Card({ draftConfig, handleNestedDraftChange, showToast }) {
         </div>
     );
 }
+
 function MobileBottomSheet({
     threatLevel, statusBoxClass, statusIcon, statusTitle, statusSub,
     safeRoomTimeLeft, formatTime, areasInput, setAreasInput,
@@ -562,7 +585,6 @@ function MobileBottomSheet({
     const [expanded, setExpanded] = useState(false);
     const isAlert = threatLevel==="EMERGENCY"||threatLevel==="EARLY_WARNING"||threatLevel==="CLOSE_THREAT";
 
-    // בהתרעה — פתח אוטומטית
     useEffect(()=>{
         if(isAlert) setExpanded(true);
         else setExpanded(false);
@@ -579,7 +601,6 @@ function MobileBottomSheet({
         <div className={`md:hidden absolute bottom-0 left-0 right-0 z-[500] flex flex-col transition-all duration-300 ease-in-out
             ${expanded ? 'max-h-[70vh]' : 'max-h-[52px]'}`}>
             
-            {/* ── ידית גרירה / כותרת ── */}
             <button
                 onClick={()=>setExpanded(o=>!o)}
                 className={`flex items-center justify-between px-4 py-3 rounded-t-2xl border-t border-x
@@ -594,10 +615,8 @@ function MobileBottomSheet({
                 <i className={`fas fa-chevron-${expanded?'down':'up'} text-slate-400 text-sm transition-transform duration-300`}></i>
             </button>
 
-            {/* ── תוכן מורחב ── */}
             <div className="bg-slate-900/95 backdrop-blur-md border-x border-slate-700 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3 pb-4">
                 
-                {/* כרטיס סטטוס */}
                 <div className={`p-3 rounded-xl shadow-lg transition-all duration-500 border ${statusBoxClass} flex items-center gap-3`}>
                     <i className={`fas ${statusIcon} text-3xl shrink-0 drop-shadow-md`}></i>
                     <div>
@@ -606,7 +625,6 @@ function MobileBottomSheet({
                     </div>
                 </div>
 
-                {/* טיימר ממ"ד */}
                 {threatLevel==="EMERGENCY"&&safeRoomTimeLeft>0&&(
                     <div className="bg-black/40 rounded-xl p-3 border border-white/20 text-center">
                         <p className="text-[10px] uppercase tracking-widest opacity-70 mb-0.5">זמן שהייה בממ"ד</p>
@@ -616,7 +634,6 @@ function MobileBottomSheet({
                     </div>
                 )}
 
-                {/* אזורי מעקב */}
                 <div className="bg-slate-800 rounded-xl p-3 border border-slate-700">
                     <div className="flex items-center gap-2 mb-2">
                         <i className="fas fa-crosshairs text-blue-400 text-sm"></i>
@@ -636,7 +653,6 @@ function MobileBottomSheet({
                     </div>
                 </div>
 
-                {/* מצבי כוננות — גרסה קומפקטית */}
                 <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">מצבי כוננות</p>
                     <div className="grid grid-cols-1 gap-1.5">
@@ -673,6 +689,7 @@ function MobileBottomSheet({
         </div>
     );
 }
+
 /* ══════════════════════════════════════════
    APP
 ══════════════════════════════════════════ */
@@ -791,9 +808,6 @@ function App() {
             let threat = "ROUTINE";
             const alerts = data.all_alerts || [];
             
-            // תמיד שומרים את ההתראות הגלובליות
-            // גם אם האזור שלי בשגרה (status 0), ייתכן שיש אזעקות אחרות בארץ
-            
             if(data.status==="2"){
                 threat = "ALL_CLEAR";
             } else if(data.status==="1"){
@@ -802,8 +816,6 @@ function App() {
             } else if(data.close_threat&&alerts.length>0){
                 threat = "CLOSE_THREAT";
             } else {
-                // גם במצב Routine אנחנו לא מאפסים את all_alerts כי השרת שולח אותו
-                // השרת אחראי לנקות אותו כשהזמן עובר
                 data.close_threat = false;
             }
 
@@ -967,7 +979,6 @@ function App() {
                 {activeTab==='home'&&(
                     <div className="flex flex-col md:flex-row w-full h-full min-h-0 gap-2 md:gap-4 relative flex-1">
                         
-                        {/* ── Desktop: עמודה שמאלית ── */}
                         <div className="hidden md:flex flex-col gap-2 md:gap-3 md:w-[340px] shrink-0 min-h-0 overflow-y-auto custom-scrollbar">
                             <div className={`p-4 md:p-6 rounded-2xl shadow-xl transition-all duration-500 border ${statusBoxClass} flex flex-row items-center md:flex-col md:text-center z-20 shrink-0`}>
                                 <i className={`fas ${statusIcon} text-4xl md:text-6xl md:mb-4 shrink-0 ml-4 md:ml-0 drop-shadow-md`}></i>
@@ -1008,7 +1019,6 @@ function App() {
                             <StatusModesPanel threatLevel={status.threat_level}/>
                         </div>
 
-                        {/* ── המפה — תמיד מלאה ── */}
                         <div className="flex-1 relative bg-slate-800 rounded-2xl shadow-xl w-full min-h-0 min-w-0 z-10">
                             <MapView
                                 threatLevel={status.threat_level}
@@ -1021,7 +1031,6 @@ function App() {
                             />
                         </div>
 
-                        {/* ══ Mobile Bottom Sheet ══ */}
                         <MobileBottomSheet
                             threatLevel={status.threat_level}
                             statusBoxClass={statusBoxClass}

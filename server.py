@@ -25,25 +25,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 CITIES_FILE = os.path.join(BASE_DIR, "cities.json")
+CITIES_POLYGONS_FILE = os.path.join(BASE_DIR, "cities_polygons.json")
 
-# ─── קודי פיקוד העורף (מבוסס JSON אמיתי) ───
-# cat=1  : ירי רקטות וטילים          → EMERGENCY (אדום)
-# cat=6  : חדירת כלי טיס עוין        → UAV       (כתום)
-# cat=10 : שני מצבים לפי title:
-#          "הסתיים"   → PENDING       (צהוב - סיום)
-#          אחרת       → EARLY_WARNING (סגול - התרעה מקדימה)
-
+# ─── קודי פיקוד העורף ───
 ALERT_TYPE_EMERGENCY = "EMERGENCY"
 ALERT_TYPE_UAV       = "UAV"
 ALERT_TYPE_EARLY     = "EARLY_WARNING"
 ALERT_TYPE_PENDING   = "PENDING"
 
 # ─── מילון פוליגונים פעילים ───
-# מבנה: { "שם_עיר": { "polygon_type": ..., "last_updated": float, "lat": ..., "lng": ... } }
 active_polygons: dict = {}
 active_polygons_lock  = threading.Lock()
 
-# כמה שניות לפני שאזעקה פעילה הופכת לצהובה
 YELLOW_TIMEOUT_SECONDS = 60
 
 CITIES_COORDS = {
@@ -112,6 +105,7 @@ CITIES_COORDS = {
 }
 
 cities_from_file = {}
+cities_polygons = {}
 
 def load_cities_from_file():
     global cities_from_file
@@ -136,6 +130,28 @@ def load_cities_from_file():
         print(f"[Cities] שגיאה בטעינת cities.json: {e}")
 
 
+def load_cities_polygons():
+    """טוען את קובץ הפוליגונים המלא"""
+    global cities_polygons
+    try:
+        with open(CITIES_POLYGONS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        count = 0
+        for city_name, city_data in data.items():
+            if isinstance(city_data, dict) and "polygon" in city_data:
+                cities_polygons[city_name] = {
+                    "polygon": city_data["polygon"],
+                    "lat": city_data.get("lat"),
+                    "lng": city_data.get("lng")
+                }
+                count += 1
+        print(f"[Polygons] נטענו {count} פוליגונים מקובץ cities_polygons.json")
+    except FileNotFoundError:
+        print("[Polygons] קובץ cities_polygons.json לא נמצא! נשתמש בעיגולים בלבד.")
+    except Exception as e:
+        print(f"[Polygons] שגיאה בטעינת cities_polygons.json: {e}")
+
+
 current_status = {
     "status": "0",
     "active_area": "",
@@ -152,8 +168,8 @@ cast_devices    = {}
 cast_browser    = None
 previous_volumes = {}
 
-last_my_area_alert_time = 0   # הפעם האחרונה שהייתה אזעקה באזור שלי
-last_my_area_cat        = 1   # קטגוריה אחרונה של האזעקה אצלי
+last_my_area_alert_time = 0
+last_my_area_cat        = 1
 last_printed_live       = ""
 
 
@@ -162,42 +178,94 @@ last_printed_live       = ""
 # ════════════════════════════════════════════════════════════
 
 def get_polygon_type_from_cat(cat: str, title: str) -> str:
-    """מחזיר את סוג הפוליגון לפי cat ו-title מה-JSON האמיתי."""
     if cat == "1":
         return ALERT_TYPE_EMERGENCY
     elif cat == "6":
         return ALERT_TYPE_UAV
     elif cat == "10":
         if "הסתיים" in title:
-            return ALERT_TYPE_PENDING   # סיום אירוע
+            return ALERT_TYPE_PENDING
         else:
-            return ALERT_TYPE_EARLY     # התרעה מקדימה
-    return ALERT_TYPE_EMERGENCY         # ברירת מחדל
+            return ALERT_TYPE_EARLY
+    return ALERT_TYPE_EMERGENCY
+
+
+def match_city_name(city_name: str) -> str:
+    """
+    מחפש התאמה לשם עיר עם לוגיקה משופרת:
+    1. Exact Match - התאמה מלאה
+    2. Partial Match עם גבולות מילה (רווח, מקף, סוף מחרוזת)
+    """
+    # 1. Exact Match קודם
+    if city_name in cities_polygons:
+        return city_name
+    if city_name in cities_from_file:
+        return city_name
+    for key in CITIES_COORDS:
+        if key == city_name:
+            return key
+    
+    # 2. Partial Match עם בדיקת גבולות מילה
+    import re
+    for key in cities_polygons:
+        # בדיקה אם city_name הוא prefix של key עם גבול מילה
+        pattern = r'^' + re.escape(city_name) + r'($|[\s\-])'
+        if re.match(pattern, key):
+            return key
+        # בדיקה הפוכה - אם key הוא prefix של city_name
+        pattern = r'^' + re.escape(key) + r'($|[\s\-])'
+        if re.match(pattern, city_name):
+            return key
+    
+    # 3. Fallback ל-substring רגיל (רק אם לא נמצא אחרת)
+    for key in cities_polygons:
+        if city_name in key or key in city_name:
+            return key
+    
+    return None
+
+
+def get_coords_for_city(city_name: str):
+    """מחזיר קואורדינטות + פוליגון אם קיים"""
+    matched_name = match_city_name(city_name)
+    if not matched_name:
+        return None
+    
+    # קודם כל פוליגונים
+    if matched_name in cities_polygons:
+        return cities_polygons[matched_name]
+    
+    # אחר כך cities.json
+    if matched_name in cities_from_file:
+        return cities_from_file[matched_name]
+    
+    # אחר כך CITIES_COORDS
+    if matched_name in CITIES_COORDS:
+        return CITIES_COORDS[matched_name]
+    
+    return None
 
 
 def upsert_polygons(cities: list, polygon_type: str):
-    """מוסיף עיר חדשה או מרענן עיר קיימת (אפס טיימר → חזרה לאדום/כתום)."""
     now = time.time()
     with active_polygons_lock:
         for city in cities:
             coords = get_coords_for_city(city)
             if city in active_polygons:
-                # עיר קיימת - רענן זמן ועדכן צבע (אפשר לחזור מצהוב לאדום)
                 active_polygons[city]["last_updated"]  = now
                 active_polygons[city]["polygon_type"]  = polygon_type
             else:
-                # עיר חדשה
                 active_polygons[city] = {
                     "name":         city,
                     "lat":          coords["lat"] if coords else None,
                     "lng":          coords["lng"] if coords else None,
+                    "polygon":      coords.get("polygon") if coords and isinstance(coords, dict) else None,
                     "polygon_type": polygon_type,
                     "last_updated": now
                 }
 
 
 def end_event_for_cities(cities: list):
-    """קוד 10 + 'הסתיים': מוחק את הערים שסיימו מהרשימה הפעילה."""
     with active_polygons_lock:
         for city in cities:
             if city in active_polygons:
@@ -206,29 +274,22 @@ def end_event_for_cities(cities: list):
 
 
 def apply_early_warning(cities: list):
-    """קוד 10 ללא 'הסתיים': מוסיף פוליגון סגול (לא דורס אדום/כתום קיים)."""
     now = time.time()
     with active_polygons_lock:
         for city in cities:
             if city not in active_polygons:
-                # רק אם אין כבר אזעקה פעילה לאותה עיר
                 coords = get_coords_for_city(city)
                 active_polygons[city] = {
                     "name":         city,
                     "lat":          coords["lat"] if coords else None,
                     "lng":          coords["lng"] if coords else None,
+                    "polygon":      coords.get("polygon") if coords and isinstance(coords, dict) else None,
                     "polygon_type": ALERT_TYPE_EARLY,
                     "last_updated": now
                 }
 
 
 def polygon_timeout_loop():
-    """
-    לולאה ברקע שרצה כל שנייה.
-    אם עברה YELLOW_TIMEOUT_SECONDS מאז last_updated של פוליגון אדום/כתום
-    → הופכת אותו לצהוב (PENDING).
-    פוליגון צהוב/סגול לא נמחק אוטומטית - רק קוד 10+"הסתיים" ימחק אותו.
-    """
     while True:
         now = time.time()
         with active_polygons_lock:
@@ -243,7 +304,6 @@ def polygon_timeout_loop():
 
 
 def build_all_alerts_list() -> list:
-    """בונה את הרשימה שנשלחת ל-frontend מתוך active_polygons."""
     with active_polygons_lock:
         return list(active_polygons.values())
 
@@ -288,18 +348,6 @@ def load_config():
 def save_config(config_data):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config_data, f, ensure_ascii=False, indent=4)
-
-
-def get_coords_for_city(city_name):
-    for key, coords in CITIES_COORDS.items():
-        if key in city_name:
-            return coords
-    if city_name in cities_from_file:
-        return cities_from_file[city_name]
-    for key, coords in cities_from_file.items():
-        if key in city_name or city_name in key:
-            return coords
-    return None
 
 
 def haversine_distance(lat1, lng1, lat2, lng2):
@@ -621,7 +669,7 @@ async def run_playwright():
 
                 cities = data.get("data", [])
                 if not cities:
-                    return  # קובץ ריק = אין אזעקות
+                    return
 
                 if isinstance(cities, str):
                     cities = [cities]
@@ -633,32 +681,26 @@ async def run_playwright():
                 my_areas  = config.get("areas", [])
                 radius_km = config.get("proximity_radius_km", 10)
 
-                # ── טיפול לפי סוג הודעה ──
                 is_end_event    = (cat == "10" and "הסתיים" in title)
                 is_early_warning = (cat == "10" and "הסתיים" not in title)
                 is_active_alert  = cat in ("1", "6")
 
                 if is_end_event:
-                    # מחיקת ערים שסיימו
                     end_event_for_cities(cities)
 
                 elif is_early_warning:
-                    # סגול - לא דורס אדום/כתום קיים
                     apply_early_warning(cities)
 
                 elif is_active_alert:
-                    # אדום / כתום + אפס טיימר לערים קיימות
                     polygon_type = get_polygon_type_from_cat(cat, title)
                     upsert_polygons(cities, polygon_type)
 
-                    # ── בדיקה אם האזעקה באזור שלי ──
                     matched_area = next(
                         (area for area in my_areas
                          if any(area in city for city in cities)), None
                     )
 
                     if not matched_area:
-                        # בדיקת קרבה גיאוגרפית
                         if check_close_threat(cities, my_areas, radius_km):
                             current_status["close_threat"] = True
 
@@ -668,7 +710,6 @@ async def run_playwright():
                         current_status["alert_type"]   = title
                         current_status["timestamp"]    = int(time.time() * 1000)
 
-                        # כריזה רק אם זו אזעקה חדשה (לא רענון של אותה אחת)
                         if time.time() - last_my_area_alert_time > 15:
                             generate_audio_files(config, matched_area)
                             trigger_google_home_thread("alert", cat)
@@ -676,7 +717,6 @@ async def run_playwright():
                         last_my_area_alert_time = time.time()
                         last_my_area_cat        = cat
 
-                # לוג קצר
                 log_msg = f"[Live] cat={cat} | {title} | {len(cities)} ישובים"
                 if log_msg != last_printed_live:
                     print(log_msg)
@@ -691,7 +731,6 @@ async def run_playwright():
         print(f"[Playwright] מאזין להתרעות. אזורים: {config.get('areas', [])}")
         await page.goto("https://www.oref.org.il/heb/alerts-history/")
 
-        # ── לולאה ראשית: עדכון current_status כל שנייה ──
         while True:
             now = time.time()
 
@@ -699,7 +738,6 @@ async def run_playwright():
                 alerts = build_all_alerts_list()
                 current_status["all_alerts"] = alerts
 
-                # האם יש אזעקה פעילה (אדום/כתום) באזור שלי?
                 my_alert_active = now - last_my_area_alert_time < YELLOW_TIMEOUT_SECONDS
 
                 if my_alert_active:
@@ -707,7 +745,6 @@ async def run_playwright():
                         current_status["status"] = "1"
                         print("\n>>> סטטוס: 1 (אזעקה אצלי) <<<\n")
                 else:
-                    # בדוק אם האזור שלי עדיין צהוב (PENDING) במפה
                     config   = load_config()
                     my_areas = config.get("areas", [])
                     with active_polygons_lock:
@@ -739,12 +776,11 @@ async def run_playwright():
 
 if __name__ == "__main__":
     load_cities_from_file()
+    load_cities_polygons()
     init_config = load_config()
     generate_audio_files(init_config)
 
-    # הפעלת לולאת טיימר פוליגונים בthread נפרד
     threading.Thread(target=polygon_timeout_loop, daemon=True).start()
-
     threading.Thread(target=run_flask, daemon=True).start()
     time.sleep(2)
     setup_active_chromecasts(init_config)

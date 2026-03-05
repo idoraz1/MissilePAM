@@ -20,7 +20,7 @@ log.setLevel(logging.ERROR)
 app = Flask(__name__)
 CORS(app)
 
-local_ip = "YOUR_LOCAL_IP" # צונזר: הכנס את כתובת ה-IP המקומית שלך כאן
+local_ip = "YOUR_LOCAL_IP"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join(BASE_DIR, "audio")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
@@ -115,6 +115,13 @@ def load_cities_from_file():
     except Exception as e:
         print(f"[Cities] שגיאה בטעינת cities.json: {e}")
 
+# ─── סוגי התרעה לפוליגון ───
+ALERT_TYPE_EMERGENCY    = "EMERGENCY"      # אדום
+ALERT_TYPE_EARLY        = "EARLY_WARNING"  # סגול
+ALERT_TYPE_UAV          = "UAV"            # כתום
+ALERT_TYPE_PENDING      = "PENDING"        # צהוב — ממתין לסיום אירוע
+ALERT_TYPE_ROUTINE      = "ROUTINE"        # ללא פוליגון
+
 current_status = {
     "status": "0",
     "active_area": "",
@@ -125,7 +132,6 @@ current_status = {
     "close_threat": False
 }
 
-# --- פקודת ESP32 ---
 esp_command = {
     "command": "idle",
     "file": 0,
@@ -138,9 +144,8 @@ last_live_alert_time = 0
 last_history_alert_time = 0
 history_category = 0
 last_all_alerts_update = 0
-
-# משתנה למניעת הצפת לוגים
 last_printed_live = ""
+
 
 def load_config():
     try:
@@ -180,23 +185,36 @@ def load_config():
             }
         }
 
+
 def save_config(config_data):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config_data, f, ensure_ascii=False, indent=4)
 
+
+def get_polygon_type_from_alert(alert_type_str):
+    """ממיר סטרינג סוג התרעה לסוג פוליגון"""
+    if "התרעה מקדימה" in alert_type_str:
+        return ALERT_TYPE_EARLY
+    elif "כטבם" in alert_type_str or "כלי טיס" in alert_type_str:
+        return ALERT_TYPE_UAV
+    elif "סיום אירוע" in alert_type_str:
+        return ALERT_TYPE_PENDING
+    elif "ירי" in alert_type_str or "טילים" in alert_type_str or "רקטות" in alert_type_str:
+        return ALERT_TYPE_EMERGENCY
+    else:
+        return ALERT_TYPE_EMERGENCY
+
+
 def generate_audio_files(config, trigger_area=""):
     if not os.path.exists(AUDIO_DIR):
         os.makedirs(AUDIO_DIR)
-
     texts = config.get("texts", {})
     area_to_say = trigger_area if trigger_area else (config["areas"][0] if config.get("areas") else "")
-
     alert_immediate_text = texts.get("alert_immediate", "אזעקה מידית!").replace("{area}", area_to_say)
     alert_uav_text       = texts.get("alert_uav", "חדירת כלי טיס עוין!").replace("{area}", area_to_say)
     alert_early_text     = texts.get("alert_early", "התרעה מקדימה.").replace("{area}", area_to_say)
     all_clear_text       = texts.get("all_clear", "חזרה לשגרה")
     startup_text         = texts.get("startup", "מערכת ההתרעה מחוברת ומוכנה")
-
     try:
         gTTS(alert_immediate_text, lang='iw').save(os.path.join(AUDIO_DIR, "alert_immediate.mp3"))
         gTTS(alert_uav_text,       lang='iw').save(os.path.join(AUDIO_DIR, "alert_uav.mp3"))
@@ -210,6 +228,7 @@ def generate_audio_files(config, trigger_area=""):
         print(f"[Audio Error] כשל ביצירת שמע: {e}")
         return False
 
+
 def discover_chromecasts():
     chromecasts, browser = pychromecast.get_listed_chromecasts()
     if not chromecasts:
@@ -217,6 +236,7 @@ def discover_chromecasts():
     available_devices = [cc.name for cc in chromecasts]
     pychromecast.discovery.stop_discovery(browser)
     return available_devices
+
 
 def setup_active_chromecasts(config):
     global cast_devices
@@ -235,6 +255,7 @@ def setup_active_chromecasts(config):
         for name in cast_devices:
             play_audio_thread("connected.mp3", name)
 
+
 def play_audio(filename, target_speaker_name=None, override_volume=None):
     speakers_to_play = (
         [cast_devices[target_speaker_name]]
@@ -252,12 +273,14 @@ def play_audio(filename, target_speaker_name=None, override_volume=None):
         except Exception:
             pass
 
+
 def play_audio_thread(filename, target_speaker_name=None, override_volume=None):
     threading.Thread(
         target=play_audio,
         args=(filename, target_speaker_name, override_volume),
         daemon=True
     ).start()
+
 
 def trigger_google_home(status_code, alert_type=""):
     global previous_volumes
@@ -295,12 +318,14 @@ def trigger_google_home(status_code, alert_type=""):
     except Exception as e:
         print(f"[Google Home] שגיאה: {e}")
 
+
 def trigger_google_home_thread(status_code, alert_type=""):
     threading.Thread(
         target=trigger_google_home,
         args=(status_code, alert_type),
         daemon=True
     ).start()
+
 
 def get_coords_for_city(city_name):
     for key, coords in CITIES_COORDS.items():
@@ -313,6 +338,7 @@ def get_coords_for_city(city_name):
             return coords
     return None
 
+
 def haversine_distance(lat1, lng1, lat2, lng2):
     R     = 6371
     d_lat = math.radians(lat2 - lat1)
@@ -322,6 +348,7 @@ def haversine_distance(lat1, lng1, lat2, lng2):
              * math.cos(math.radians(lat2))
              * math.sin(d_lng / 2) ** 2)
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 
 def check_close_threat(all_alert_cities, my_areas, radius_km):
     for area in my_areas:
@@ -340,6 +367,7 @@ def check_close_threat(all_alert_cities, my_areas, radius_km):
                 return True
     return False
 
+
 # ============================================================
 #  Flask Routes
 # ============================================================
@@ -348,9 +376,11 @@ def check_close_threat(all_alert_cities, my_areas, radius_km):
 def serve_dashboard():
     return send_from_directory(BASE_DIR, 'index.html')
 
+
 @app.route('/audio/<path:filename>')
 def serve_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
+
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def handle_settings():
@@ -366,18 +396,30 @@ def handle_settings():
         ).start()
         return jsonify({"success": True, "message": "הגדרות נשמרו"})
 
+
 @app.route('/api/status')
 def status_api():
     s = dict(current_status)
-    # תיקון תצוגת מפה: אם שגרה או סיום אירוע - לא נציג נקודות ישנות
-    if s.get("status") in ["0", "2"]:
+    # כשסטטוס 2 (ממתין לסיום) — הפוליגונים הופכים לצהוב, לא נמחקים
+    if s.get("status") == "2":
+        updated = []
+        for alert in s.get("all_alerts", []):
+            a = dict(alert)
+            a["polygon_type"] = ALERT_TYPE_PENDING  # צהוב
+            updated.append(a)
+        s["all_alerts"] = updated
+        s["close_threat"] = False
+    # כשסטטוס 0 (שגרה) — מנקים הכל
+    elif s.get("status") == "0":
         s["all_alerts"] = []
         s["close_threat"] = False
     return jsonify(s)
 
+
 @app.route('/api/devices')
 def get_devices():
     return jsonify({"devices": discover_chromecasts()})
+
 
 @app.route('/api/test', methods=['POST'])
 def test_audio():
@@ -390,22 +432,43 @@ def test_audio():
     play_audio_thread(filename, target_speaker_name=data.get("speaker"))
     return jsonify({"success": True})
 
+
 @app.route('/api/test_esp', methods=['POST'])
 def test_esp_hardware():
     global current_status
     def run_esp_test():
         original_status = current_status["status"]
-        current_status["status"]      = "1"
-        current_status["active_area"] = "בדיקת מערכת (ESP32)"
-        current_status["alert_type"]  = "בדיקה יזומה"
+        current_status["status"]       = "1"
+        current_status["active_area"]  = "בדיקת מערכת (ESP32)"
+        current_status["alert_type"]   = "בדיקה יזומה"
         current_status["is_test_mode"] = True
         time.sleep(5)
-        current_status["status"]      = original_status
-        current_status["active_area"] = ""
-        current_status["alert_type"]  = ""
+        current_status["status"]       = original_status
+        current_status["active_area"]  = ""
+        current_status["alert_type"]   = ""
         current_status["is_test_mode"] = False
     threading.Thread(target=run_esp_test, daemon=True).start()
     return jsonify({"success": True, "message": "פקודת בדיקה נשלחה"})
+
+
+@app.route('/api/clear_alerts', methods=['POST'])
+def clear_alerts():
+    """כפתור חירום — מנקה את כל הפוליגונים והסטטוסים"""
+    global current_status, last_live_alert_time, last_history_alert_time
+    global history_category, last_all_alerts_update, last_printed_live
+    current_status["status"]       = "0"
+    current_status["active_area"]  = ""
+    current_status["alert_type"]   = ""
+    current_status["all_alerts"]   = []
+    current_status["close_threat"] = False
+    last_live_alert_time           = 0
+    last_history_alert_time        = 0
+    history_category               = 0
+    last_all_alerts_update         = 0
+    last_printed_live              = ""
+    print("[Manual] כל הפוליגונים נוקו ידנית.")
+    return jsonify({"success": True, "message": "המפה נוקתה"})
+
 
 @app.route('/api/esp_command')
 def esp_command_api():
@@ -414,26 +477,23 @@ def esp_command_api():
     esp_command = {"command": "idle", "file": 0, "volume": 25}
     return jsonify(cmd)
 
+
 @app.route('/api/esp_play', methods=['POST'])
 def esp_play():
     global esp_command
-    data = request.json
+    data     = request.json
     file_num = int(data.get("file", 1))
     volume   = int(data.get("volume", 25))
-    esp_command = {
-        "command": "play",
-        "file":    file_num,
-        "volume":  volume
-    }
+    esp_command = {"command": "play", "file": file_num, "volume": volume}
     print(f"[ESP32] פקודת ניגון נשמרה: קובץ {file_num}, ווליום {volume}")
     return jsonify({"success": True, "queued_file": file_num})
 
+
 @app.route('/api/esp_sd_zip')
 def esp_sd_zip():
-    config   = load_config()
-    esp_cfg  = config.get("esp32", {})
-    zip_buffer = io.BytesIO()
-
+    config      = load_config()
+    esp_cfg     = config.get("esp32", {})
+    zip_buffer  = io.BytesIO()
     file_mapping = {
         esp_cfg.get("file_alert_immediate", 1): "alert_immediate.mp3",
         esp_cfg.get("file_all_clear",        2): "routine.mp3",
@@ -441,24 +501,17 @@ def esp_sd_zip():
         esp_cfg.get("file_uav",               4): "alert_uav.mp3",
         esp_cfg.get("file_alert_early",       5): "alert_early.mp3",
     }
-
-    missing = []
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         for sd_num, src_filename in file_mapping.items():
             src_path = os.path.join(AUDIO_DIR, src_filename)
             zip_name = f"MP3/{sd_num:04d}.mp3"
             if os.path.exists(src_path):
                 zf.write(src_path, zip_name)
-            else:
-                missing.append(src_filename)
-
+                print(f"[SD ZIP] {src_filename} → {zip_name}")
     zip_buffer.seek(0)
-    return send_file(
-        zip_buffer,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name='SD_Card_Files.zip'
-    )
+    return send_file(zip_buffer, mimetype='application/zip',
+                     as_attachment=True, download_name='SD_Card_Files.zip')
+
 
 @app.route('/api/esp_sd_status')
 def esp_sd_status():
@@ -485,8 +538,10 @@ def esp_sd_status():
         })
     return jsonify(result)
 
+
 def run_flask():
     app.run(host='0.0.0.0', port=5000, use_reloader=False)
+
 
 def get_alert_type_string(category, title):
     title_str = str(title)
@@ -502,11 +557,13 @@ def get_alert_type_string(category, title):
     else:
         return f"סוג אחר (קוד: {cat_int})"
 
+
 def is_system_in_active_alert():
     now_ts = time.time()
-    if now_ts - last_live_alert_time   < 20:  return True
+    if now_ts - last_live_alert_time    < 20:  return True
     if now_ts - last_history_alert_time <= 120: return True
     return False
+
 
 async def run_playwright():
     global current_status, last_live_alert_time, last_history_alert_time
@@ -537,9 +594,10 @@ async def run_playwright():
                         now      = datetime.now()
                         filename = response.url.split('/')[-1]
 
+                        # ── Alerts.json (Live) ──
                         if isinstance(data, dict) and "Alerts.json" in filename:
                             alert_cities = data.get("data", [])
-                            
+
                             if alert_cities:
                                 cat_raw   = data.get("category", 1)
                                 cat_int   = int(cat_raw) if str(cat_raw).isdigit() else 0
@@ -547,58 +605,67 @@ async def run_playwright():
                                 type_str  = get_alert_type_string(cat_int, title_str)
                                 is_end_event = (cat_int == 13 or "הסתיים" in title_str or "חזרה לשגרה" in title_str)
 
-                                # מניעת הצגת התראות "סיום אירוע" כנקודות אדומות על המפה
                                 if is_end_event:
-                                    current_status["all_alerts"]   = []
+                                    # סיום אירוע — הפוליגונים הופכים לצהוב (PENDING)
+                                    updated = []
+                                    for a in current_status.get("all_alerts", []):
+                                        ac = dict(a)
+                                        ac["polygon_type"] = ALERT_TYPE_PENDING
+                                        updated.append(ac)
+                                    current_status["all_alerts"]   = updated
                                     current_status["close_threat"] = False
                                 else:
+                                    # אזעקה פעילה — בנה רשימת פוליגונים צבעוניים
                                     if isinstance(alert_cities, str):
                                         alert_cities = [alert_cities]
+                                    polygon_type = get_polygon_type_from_alert(type_str)
                                     formatted_alerts = []
                                     for city in alert_cities:
                                         coords = get_coords_for_city(city)
                                         formatted_alerts.append({
-                                            "name": city,
-                                            "lat":  coords["lat"] if coords else None,
-                                            "lng":  coords["lng"] if coords else None
+                                            "name":         city,
+                                            "lat":          coords["lat"] if coords else None,
+                                            "lng":          coords["lng"] if coords else None,
+                                            "polygon_type": polygon_type
                                         })
                                     current_status["all_alerts"]   = formatted_alerts
                                     last_all_alerts_update         = time.time()
                                     is_close = check_close_threat(alert_cities, my_areas, radius_km)
                                     current_status["close_threat"] = is_close
 
-                        else:
-                            if not is_system_in_active_alert():
-                                current_status["all_alerts"]   = []
-                                current_status["close_threat"] = False
+                                if isinstance(alert_cities, str):
+                                    alert_cities = [alert_cities]
+                                alert_cities_str = ", ".join(alert_cities)
+                                matched_area = next(
+                                    (area for area in my_areas if area in alert_cities_str), None
+                                )
+                                if matched_area:
+                                    current_status["active_area"] = matched_area
+                                    current_status["alert_type"]  = type_str
+                                    current_status["timestamp"]   = int(time.time() * 1000)
+                                    if is_end_event:
+                                        last_live_alert_time    = 0
+                                        last_history_alert_time = time.time()
+                                        history_category        = 13
+                                    else:
+                                        last_live_alert_time = time.time()
+                                        generate_audio_files(config, matched_area)
 
-                        if alert_cities:
-                            alert_cities_str = ", ".join(alert_cities)
-                            matched_area = next(
-                                (area for area in my_areas if area in alert_cities_str), None
-                            )
-                            if matched_area:
-                                current_status["active_area"] = matched_area
-                                current_status["alert_type"]  = type_str
-                                current_status["timestamp"]   = int(time.time() * 1000)
-                                if is_end_event:
-                                    last_live_alert_time    = 0
-                                    last_history_alert_time = time.time()
-                                    history_category        = 13
-                                else:
-                                    last_live_alert_time = time.time()
-                                    generate_audio_files(config, matched_area)
-                        
-                            # הדפסה חכמה ללוג - רק אם משהו השתנה
-                            log_msg = f"[Live] {alert_cities_str} | סוג: {type_str} | קרוב: {current_status['close_threat']}"
-                            if log_msg != last_printed_live:
-                                print(log_msg)
-                                last_printed_live = log_msg
+                                log_msg = f"[Live] {alert_cities_str} | סוג: {type_str} | קרוב: {current_status['close_threat']}"
+                                if log_msg != last_printed_live:
+                                    print(log_msg)
+                                    last_printed_live = log_msg
 
+                            else:
+                                if not is_system_in_active_alert():
+                                    current_status["all_alerts"]   = []
+                                    current_status["close_threat"] = False
+
+                        # ── AlertsHistory.json ──
                         elif isinstance(data, list) and "AlertsHistory.json" in filename:
-                            found_area       = False
+                            found_area        = False
                             matched_area_hist = ""
-                            latest_event     = None
+                            latest_event      = None
                             for alert in data:
                                 if isinstance(alert, dict):
                                     alert_data_str = alert.get("data", "")
@@ -642,7 +709,7 @@ async def run_playwright():
 
         while True:
             if not current_status.get("is_test_mode", False):
-                now_ts         = time.time()
+                now_ts          = time.time()
                 new_status_code = "0"
                 if now_ts - last_live_alert_time < 20:
                     new_status_code = "1"
@@ -655,11 +722,19 @@ async def run_playwright():
                     if new_status_code == "1":
                         trigger_google_home_thread("1", current_status.get("alert_type", ""))
                     elif new_status_code == "2":
+                        # מעבר לצהוב — הפוליגונים מתעדכנים ל-PENDING
+                        updated = []
+                        for a in current_status.get("all_alerts", []):
+                            ac = dict(a)
+                            ac["polygon_type"] = ALERT_TYPE_PENDING
+                            updated.append(ac)
+                        current_status["all_alerts"] = updated
                         trigger_google_home_thread("2")
                     elif new_status_code == "0":
-                        current_status["active_area"] = ""
-                        current_status["alert_type"]  = ""
-                        current_status["all_alerts"]  = []
+                        # שגרה מלאה — ניקוי הכל
+                        current_status["active_area"]  = ""
+                        current_status["alert_type"]   = ""
+                        current_status["all_alerts"]   = []
                         current_status["close_threat"] = False
 
                 if new_status_code == "0":
@@ -668,6 +743,7 @@ async def run_playwright():
                         current_status["close_threat"] = False
 
             await asyncio.sleep(1)
+
 
 if __name__ == "__main__":
     load_cities_from_file()

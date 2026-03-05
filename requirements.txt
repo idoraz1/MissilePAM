@@ -1,21 +1,21 @@
 # ── שרת ──────────────────────────────────────
-flask>=3.0.0
-flask-cors>=4.0.0
+flask
+flask-cors
 
 # ── סקירת פיקוד העורף ────────────────────────
-playwright>=1.40.0
+playwright
 
 # ── Google Home / Chromecast ─────────────────
-pychromecast>=14.0.0
+pychromecast
 
 # ── TTS — כריזה קולית בעברית ─────────────────
-gTTS>=2.5.0
+gTTS
 
 # ── שמע ──────────────────────────────────────
-pydub>=0.25.1
+pydub
 
 # ── כלי עזר ──────────────────────────────────
-requests>=2.31.0
+requests
 
 gunicorn
 

@@ -58,6 +58,25 @@ async def run_playwright():
 
                 elif is_early_warning:
                     utils.apply_early_warning(cities)
+                    
+                    matched_area = next(
+                        (area for area in my_areas
+                         if any(area in city for city in cities)), None
+                    )
+                    if matched_area:
+                        state.current_status["status"]       = "1"
+                        state.current_status["close_threat"] = False
+                        state.current_status["active_area"]  = matched_area
+                        state.current_status["alert_type"]   = title
+                        state.current_status["timestamp"]    = int(time.time() * 1000)
+                        state.current_status["is_early_warning"] = True
+
+                        if time.time() - state.last_my_area_alert_time > 15:
+                            broadcaster.generate_audio_files(conf, matched_area)
+                            broadcaster.trigger_google_home_thread("alert_early", cat)
+
+                        state.last_my_area_alert_time = time.time()
+                        state.last_my_area_cat        = cat
 
                 elif is_active_alert:
                     polygon_type = utils.get_polygon_type_from_cat(cat, title)
@@ -73,10 +92,12 @@ async def run_playwright():
                             state.current_status["close_threat"] = True
 
                     if matched_area:
+                        state.current_status["status"]       = "1"
                         state.current_status["close_threat"] = False
                         state.current_status["active_area"]  = matched_area
                         state.current_status["alert_type"]   = title
                         state.current_status["timestamp"]    = int(time.time() * 1000)
+                        state.current_status["is_early_warning"] = False
 
                         if time.time() - state.last_my_area_alert_time > 15:
                             broadcaster.generate_audio_files(conf, matched_area)

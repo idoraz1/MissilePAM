@@ -137,9 +137,6 @@ def match_city_name(city_name: str) -> str:
         return city_name
     if city_name in state.cities_from_file:
         return city_name
-    for key in CITIES_COORDS:
-        if key == city_name:
-            return key
 
     for key in state.cities_polygons:
         pattern = r'^' + re.escape(city_name) + r'($|[\s\-])'
@@ -151,6 +148,10 @@ def match_city_name(city_name: str) -> str:
 
     for key in state.cities_polygons:
         if city_name in key or key in city_name:
+            return key
+
+    for key in CITIES_COORDS:
+        if key == city_name:
             return key
 
     return None

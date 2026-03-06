@@ -436,7 +436,7 @@ function App() {
     let statusSub='האזן להנחיות פיקוד העורף בעת הצורך';
 
     const hasPendingPolygons = status.all_alerts.some(a=>a.polygon_type==="PENDING");
-    const activeAlerts = status.all_alerts.filter(a=>a.polygon_type==="EMERGENCY"||a.polygon_type==="EARLY_WARNING");
+    const activeAlerts = status.all_alerts.filter(a=>a.polygon_type==="EMERGENCY"||a.polygon_type==="EARLY_WARNING"||a.polygon_type==="UAV");
     const pendingCount = status.all_alerts.filter(a=>a.polygon_type==="PENDING").length;
 
     if(status.threat_level==="EMERGENCY") {

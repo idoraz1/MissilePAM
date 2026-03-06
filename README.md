@@ -1,5 +1,5 @@
 # 🚨 MissilePAM - Missiles Public Address Map
-
+האתר הרשמי: https://missilepam.duckdns.org
 מערכת התרעות חכמה המנטרת את אתר פיקוד העורף בזמן אמת, מציגה התרעות על גבי מפה אינטראקטיבית, ומכריזה קולית דרך רמקולים חכמים (Google Cast) ובקרי ESP32.
 
 ## ✨ תכונות מרכזיות

@@ -118,7 +118,11 @@ async def run_playwright():
 
         conf = config.load_config()
         print(f"[Playwright] מאזין להתרעות. אזורים: {conf.get('areas', [])}")
-        await page.goto("https://www.oref.org.il/heb/alerts-history/")
+        
+        try:
+            await page.goto("https://www.oref.org.il/heb/alerts-history/", wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"[Playwright] שגיאה בטעינת הדף הראשונית, ממשיך לנסות ברקע: {e}")
 
         while True:
             now = time.time()

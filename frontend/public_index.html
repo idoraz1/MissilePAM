@@ -404,10 +404,23 @@ function App() {
                     threat = "CLOSE_THREAT";
                 }
                 
-                setStatus({
-                    threat_level: threat,
-                    all_alerts: data.all_alerts || [],
-                    close_threat: data.close_threat || false
+                setStatus(prevStatus => {
+                    const newAlerts = data.all_alerts || [];
+                    const newCloseThreat = data.close_threat || false;
+                    
+                    if (
+                        prevStatus.threat_level === threat &&
+                        prevStatus.close_threat === newCloseThreat &&
+                        JSON.stringify(prevStatus.all_alerts) === JSON.stringify(newAlerts)
+                    ) {
+                        return prevStatus;
+                    }
+                    
+                    return {
+                        threat_level: threat,
+                        all_alerts: newAlerts,
+                        close_threat: newCloseThreat
+                    };
                 });
 
                 if(threat !== prevThreatRef.current) {

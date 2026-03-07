@@ -64,12 +64,9 @@ async def run_playwright():
                          if any(area in city for city in cities)), None
                     )
                     if matched_area:
-                        state.current_status["status"]       = "1"
-                        state.current_status["close_threat"] = False
                         state.current_status["active_area"]  = matched_area
                         state.current_status["alert_type"]   = title
                         state.current_status["timestamp"]    = int(time.time() * 1000)
-                        state.current_status["is_early_warning"] = True
 
                         if time.time() - state.last_my_area_alert_time > 15:
                             broadcaster.generate_audio_files(conf, matched_area)
@@ -87,17 +84,10 @@ async def run_playwright():
                          if any(area in city for city in cities)), None
                     )
 
-                    if not matched_area:
-                        if utils.check_close_threat(cities, my_areas, radius_km):
-                            state.current_status["close_threat"] = True
-
                     if matched_area:
-                        state.current_status["status"]       = "1"
-                        state.current_status["close_threat"] = False
                         state.current_status["active_area"]  = matched_area
                         state.current_status["alert_type"]   = title
                         state.current_status["timestamp"]    = int(time.time() * 1000)
-                        state.current_status["is_early_warning"] = False
 
                         if time.time() - state.last_my_area_alert_time > 15:
                             broadcaster.generate_audio_files(conf, matched_area)
@@ -131,33 +121,60 @@ async def run_playwright():
                 alerts = utils.build_all_alerts_list()
                 state.current_status["all_alerts"] = alerts
 
-                my_alert_active = now - state.last_my_area_alert_time < state.YELLOW_TIMEOUT_SECONDS
+                conf = config.load_config()
+                my_areas = conf.get("areas", [])
+                radius_km = conf.get("proximity_radius_km", 10)
 
-                if my_alert_active:
-                    if state.current_status["status"] != "1":
-                        state.current_status["status"] = "1"
-                        print("\n>>> סטטוס: 1 (אזעקה אצלי) <<<\n")
-                else:
-                    conf     = config.load_config()
-                    my_areas = conf.get("areas", [])
-                    with state.active_polygons_lock:
-                        my_area_pending = any(
-                            state.active_polygons.get(city, {}).get("polygon_type") == state.ALERT_TYPE_PENDING
-                            for area in my_areas
-                            for city in state.active_polygons
-                            if area in city
-                        )
-                    if my_area_pending:
-                        if state.current_status["status"] != "2":
-                            state.current_status["status"] = "2"
-                            print("\n>>> סטטוס: 2 (ממתין לסיום) <<<\n")
+                has_emergency = False
+                has_early_warning = False
+                has_pending = False
+                has_close_threat = False
+
+                with state.active_polygons_lock:
+                    for city, data in state.active_polygons.items():
+                        polygon_type = data.get("polygon_type")
+                        is_my_area = any(area in city for area in my_areas)
+                        
+                        if is_my_area:
+                            if polygon_type in (state.ALERT_TYPE_EMERGENCY, state.ALERT_TYPE_UAV):
+                                has_emergency = True
+                            elif polygon_type == state.ALERT_TYPE_EARLY:
+                                has_early_warning = True
+                            elif polygon_type == state.ALERT_TYPE_PENDING:
+                                has_pending = True
+                        elif polygon_type in (state.ALERT_TYPE_EMERGENCY, state.ALERT_TYPE_UAV):
+                            if utils.check_close_threat([city], my_areas, radius_km):
+                                has_close_threat = True
+
+                new_status = "0"
+                if has_emergency:
+                    new_status = "4"
+                elif has_early_warning:
+                    new_status = "3"
+                elif has_close_threat:
+                    new_status = "2"
+                elif has_pending:
+                    new_status = "1"
+
+                # If status changed
+                if state.current_status["status"] != new_status:
+                    old_status = state.current_status["status"]
+                    state.current_status["status"] = new_status
+                    
+                    if new_status == "4":
+                        print("\n>>> סטטוס: 4 (אזעקה מידית) <<<\n")
+                    elif new_status == "3":
+                        print("\n>>> סטטוס: 3 (התרעה מוקדמת) <<<\n")
+                    elif new_status == "2":
+                        print("\n>>> סטטוס: 2 (עירני) <<<\n")
+                    elif new_status == "1":
+                        print("\n>>> סטטוס: 1 (ממתין לסיום אירוע) <<<\n")
+                        if old_status in ("4", "3"):
                             broadcaster.trigger_google_home_thread("all_clear")
-                    else:
-                        if state.current_status["status"] != "0":
-                            state.current_status["status"]       = "0"
-                            state.current_status["active_area"]  = ""
-                            state.current_status["alert_type"]   = ""
-                            state.current_status["close_threat"] = False
-                            print("\n>>> סטטוס: 0 (שגרה) <<<\n")
+                    elif new_status == "0":
+                        state.current_status["active_area"]  = ""
+                        state.current_status["alert_type"]   = ""
+                        state.current_status["close_threat"] = False
+                        print("\n>>> סטטוס: 0 (שגרה) <<<\n")
 
             await asyncio.sleep(1)

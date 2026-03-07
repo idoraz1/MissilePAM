@@ -398,12 +398,16 @@ function App() {
                 const data = await res.json();
                 
                 let threat = "ROUTINE";
-                if(data.status === "1") {
-                     threat = data.is_early_warning ? "EARLY_WARNING" : "EMERGENCY";
+                if(data.status === "4") {
+                     threat = "EMERGENCY";
+                } else if(data.status === "3") {
+                     threat = "EARLY_WARNING";
                 } else if(data.status === "2") {
-                    threat = "PENDING_EVENT";
-                } else if(data.close_threat) {
-                    threat = "CLOSE_THREAT";
+                     threat = "CLOSE_THREAT";
+                } else if(data.status === "1") {
+                     threat = "PENDING_EVENT";
+                } else if(data.status === "0") {
+                     threat = "ROUTINE";
                 }
                 
                 setStatus(prevStatus => {
@@ -412,7 +416,6 @@ function App() {
                     
                     if (
                         prevStatus.threat_level === threat &&
-                        prevStatus.close_threat === newCloseThreat &&
                         JSON.stringify(prevStatus.all_alerts) === JSON.stringify(newAlerts)
                     ) {
                         return prevStatus;
@@ -420,8 +423,7 @@ function App() {
                     
                     return {
                         threat_level: threat,
-                        all_alerts: newAlerts,
-                        close_threat: newCloseThreat
+                        all_alerts: newAlerts
                     };
                 });
 

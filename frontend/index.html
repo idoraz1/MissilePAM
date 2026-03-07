@@ -153,35 +153,29 @@ function Toast({ toasts }) {
 /* ── StatusModesPanel ── */
 function StatusModesPanel({ threatLevel }) {
     return (
-        <div className="bg-slate-800/90 backdrop-blur rounded-2xl p-3 md:p-4 border border-slate-700 shadow-md flex flex-col gap-2 z-20 shrink-0">
-            <div className="flex items-center gap-2 mb-1">
-                <i className="fas fa-layer-group text-blue-400 text-sm"></i>
-                <span className="text-xs md:text-sm font-bold text-slate-200 tracking-wide">מצבי כוננות</span>
-            </div>
-            {THREAT_MODES.map(mode=>{
-                const isActive = mode.id === threatLevel;
-                return (
-                    <div key={mode.id} className={`mode-card${isActive?' active-card':''}`}
-                        style={{backgroundColor:isActive?mode.bgColor:'rgba(15,23,42,.45)',borderColor:isActive?mode.borderColor:'rgba(71,85,105,.5)','--glow-color':mode.glowColor,opacity:isActive?1:.52}}>
-                        <div className="mode-card-dot" style={{backgroundColor:isActive?mode.dotColor:'#475569'}}></div>
-                        <i className={`fas ${mode.icon} text-sm mt-0.5 flex-shrink-0`} style={{color:isActive?mode.dotColor:'#64748b'}}></i>
-                        <div className="flex flex-col min-w-0">
-                            <span className="text-xs font-bold leading-tight" style={{color:isActive?mode.textColor:'#94a3b8'}}>
-                                {mode.label}
-                                {isActive&&(
-                                    <span className="mr-1.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
-                                        style={{backgroundColor:mode.dotColor+'33',color:mode.dotColor,border:`1px solid ${mode.dotColor}55`}}>
-                                        פעיל
-                                    </span>
-                                )}
-                            </span>
-                            <span className="text-[10px] leading-snug mt-0.5" style={{color:isActive?mode.textColor+'cc':'#475569'}}>
-                                {mode.description}
-                            </span>
+        <div className="bg-slate-800/90 backdrop-blur rounded-2xl p-4 border border-slate-700 shadow-xl flex flex-col gap-3 shrink-0">
+            <h3 className="text-sm font-bold text-slate-300 mb-1 border-b border-slate-700 pb-2">מצבי התרעה</h3>
+            <div className="flex flex-col gap-2">
+                {THREAT_MODES.map(mode=>{
+                    const isActive = threatLevel===mode.id;
+                    return (
+                        <div key={mode.id}
+                            className={`mode-card ${isActive?'active-card':''}`}
+                            style={{
+                                '--glow-color':mode.glowColor,
+                                borderColor: isActive?mode.borderColor:'rgba(71,85,105,0.4)',
+                                backgroundColor: isActive?mode.bgColor:'rgba(30,41,59,0.5)',
+                            }}>
+                            <div className="mode-card-dot shadow-sm" style={{backgroundColor:mode.dotColor, boxShadow:isActive?`0 0 8px ${mode.dotColor}`:'none'}}></div>
+                            <div className="flex flex-col gap-0.5">
+                                <span className="font-bold text-sm" style={{color:isActive?mode.textColor:'#cbd5e1'}}>{mode.label}</span>
+                                {isActive && <span className="text-[11px] leading-tight text-slate-300/90">{mode.description}</span>}
+                            </div>
+                            <i className={`fas ${mode.icon} absolute left-3 top-1/2 -translate-y-1/2 text-2xl opacity-20`} style={{color:mode.dotColor}}></i>
                         </div>
-                    </div>
-                );
-            })}
+                    );
+                })}
+            </div>
         </div>
     );
 }
@@ -597,83 +591,47 @@ function MobileBottomSheet({
         threatLevel==="PENDING_EVENT"? "bg-yellow-500" :
         "bg-slate-500";
 
+    const [isOpen, setIsOpen] = useState(false);
+    useEffect(()=>{
+        if(isAlert) setIsOpen(true);
+        else setIsOpen(false);
+    },[isAlert]);
+
     return (
-        <div className={`md:hidden absolute bottom-0 left-0 right-0 z-[500] flex flex-col transition-all duration-300 ease-in-out
-            ${expanded ? 'max-h-[70vh]' : 'max-h-[52px]'}`}>
-            
-            <button
-                onClick={()=>setExpanded(o=>!o)}
-                className={`flex items-center justify-between px-4 py-3 rounded-t-2xl border-t border-x
-                    border-slate-600 bg-slate-900/95 backdrop-blur-md shadow-2xl w-full`}>
-                <div className="flex items-center gap-2">
-                    <div className={`w-2.5 h-2.5 rounded-full ${handleColor} ${isAlert?'animate-pulse':''}`}></div>
-                    <span className="text-sm font-bold text-slate-100">{statusTitle}</span>
-                    {isAlert&&(
-                        <span className="text-[10px] text-slate-400 font-normal truncate max-w-[140px]">{statusSub}</span>
-                    )}
+        <div className="md:hidden z-[100] mt-auto w-full max-h-[50vh] flex flex-col pointer-events-none relative shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+            <div className="pointer-events-auto bg-slate-900 border-t border-slate-700 rounded-t-3xl flex flex-col overflow-hidden max-h-full transition-all duration-300">
+                <div onClick={()=>setIsOpen(!isOpen)} className="w-full flex items-center justify-center py-2 cursor-pointer bg-slate-800/50 hover:bg-slate-800 active:bg-slate-700">
+                    <div className="w-12 h-1.5 bg-slate-600 rounded-full"></div>
                 </div>
-                <i className={`fas fa-chevron-${expanded?'down':'up'} text-slate-400 text-sm transition-transform duration-300`}></i>
-            </button>
-
-            <div className="bg-slate-900/95 backdrop-blur-md border-x border-slate-700 overflow-y-auto custom-scrollbar flex flex-col gap-3 px-3 pb-4">
                 
-                <div className={`p-3 rounded-xl shadow-lg transition-all duration-500 border ${statusBoxClass} flex items-center gap-3`}>
-                    <i className={`fas ${statusIcon} text-3xl shrink-0 drop-shadow-md`}></i>
-                    <div>
-                        <h2 className="text-base font-extrabold leading-tight">{statusTitle}</h2>
-                        <p className="text-[11px] opacity-90 leading-tight">{statusSub}</p>
-                    </div>
+                <div className={`flex flex-col flex-shrink-0 transition-colors ${statusBoxClass} border-b border-black/20 p-3 items-center justify-center text-center`} onClick={()=>setIsOpen(!isOpen)}>
+                    <i className={`fas ${statusIcon} text-3xl mb-1 drop-shadow-md`}></i>
+                    <h2 className="text-lg font-bold leading-tight">{statusTitle}</h2>
+                    {isOpen && <p className="text-xs font-medium opacity-90">{statusSub}</p>}
                 </div>
 
-                <div className="bg-slate-800 rounded-xl p-3 border border-slate-700">
-                    <div className="flex items-center gap-2 mb-2">
-                        <i className="fas fa-crosshairs text-blue-400 text-sm"></i>
-                        <span className="text-xs font-bold">אזורי מעקב</span>
-                    </div>
-                    <textarea value={areasInput}
-                        onChange={e=>{
-                            setAreasInput(e.target.value);
-                            handleDraftChange('areas',e.target.value.split(',').map(a=>a.trim()).filter(a=>a!==""));
-                        }}
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white text-xs focus:border-blue-500 focus:outline-none resize-none"
-                        rows="1" placeholder="חיפה, אשדוד..."/>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                        {(draftConfig.areas||[]).map((area,i)=>(
-                            <span key={i} className="bg-blue-900/40 text-blue-200 border border-blue-700/50 px-2 py-0.5 rounded-full text-[10px]">{area}</span>
-                        ))}
-                    </div>
-                </div>
+                <div className={`overflow-y-auto custom-scrollbar flex-1 bg-slate-900 pointer-events-auto transition-all duration-300 ease-in-out ${isOpen?'opacity-100 max-h-[35vh]':'opacity-0 max-h-0'}`}>
+                    <div className="p-4 flex flex-col gap-4">
+                        <div className="bg-slate-800/90 rounded-2xl p-3 border border-slate-700 flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                                <i className="fas fa-crosshairs text-blue-400"></i>
+                                <span className="text-sm font-bold text-slate-200">אזורי התרעה ממוקדים</span>
+                            </div>
+                            <textarea value={areasInput}
+                                onChange={e=>{
+                                    setAreasInput(e.target.value);
+                                    handleDraftChange('areas',e.target.value.split(',').map(a=>a.trim()).filter(a=>a!==""));
+                                }}
+                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white text-xs focus:border-blue-500 focus:outline-none resize-none"
+                                rows="1" placeholder="חיפה, אשדוד..."></textarea>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                                {(draftConfig.areas||[]).map((area,i)=>(
+                                    <span key={i} className="bg-blue-900/40 text-blue-200 border border-blue-700/50 px-2 py-0.5 rounded-full text-[10px]">{area}</span>
+                                ))}
+                            </div>
+                        </div>
 
-                <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">מצבי כוננות</p>
-                    <div className="grid grid-cols-1 gap-1.5">
-                        {THREAT_MODES.map(mode=>{
-                            const isActive = mode.id === threatLevel;
-                            return (
-                                <div key={mode.id}
-                                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all"
-                                    style={{
-                                        backgroundColor: isActive ? mode.bgColor : 'transparent',
-                                        opacity: isActive ? 1 : 0.45,
-                                        border: isActive ? `1px solid ${mode.borderColor}` : '1px solid transparent'
-                                    }}>
-                                    <div className="w-2 h-2 rounded-full flex-shrink-0"
-                                        style={{backgroundColor: isActive ? mode.dotColor : '#475569'}}></div>
-                                    <i className={`fas ${mode.icon} text-xs w-4 text-center`}
-                                        style={{color: isActive ? mode.dotColor : '#64748b'}}></i>
-                                    <span className="text-[11px] font-semibold flex-1"
-                                        style={{color: isActive ? mode.textColor : '#94a3b8'}}>
-                                        {mode.label}
-                                    </span>
-                                    {isActive&&(
-                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                                            style={{backgroundColor:mode.dotColor+'33', color:mode.dotColor}}>
-                                            פעיל
-                                        </span>
-                                    )}
-                                </div>
-                            );
-                        })}
+                        <StatusModesPanel threatLevel={threatLevel}/>
                     </div>
                 </div>
             </div>
@@ -789,15 +747,16 @@ function App() {
             let threat = "ROUTINE";
             const alerts = data.all_alerts || [];
             
-            if(data.status==="2"){
-                threat = "PENDING_EVENT";
-            } else if(data.status==="1"){
-                threat = (data.alert_type&&data.alert_type.includes("התרעה מקדימה"))
-                    ? "EARLY_WARNING" : "EMERGENCY";
-            } else if(data.close_threat&&alerts.length>0){
+            if(data.status==="4"){
+                threat = "EMERGENCY";
+            } else if(data.status==="3"){
+                threat = "EARLY_WARNING";
+            } else if(data.status==="2"){
                 threat = "CLOSE_THREAT";
-            } else {
-                data.close_threat = false;
+            } else if(data.status==="1"){
+                threat = "PENDING_EVENT";
+            } else if(data.status==="0"){
+                threat = "ROUTINE";
             }
 
             setStatus({...data, threat_level:threat, all_alerts:alerts, close_threat:data.close_threat||false});
@@ -855,33 +814,43 @@ function App() {
     if(loading||!draftConfig)
         return <div className="flex justify-center items-center h-screen text-2xl text-blue-400 bg-slate-900"><i className="fas fa-spin fa-circle-notch mr-3"></i> טוען מערכת...</div>;
 
-    let bgClass='bg-slate-900', statusBoxClass='bg-slate-800 border-slate-700';
-    let statusIcon='fa-check-circle text-green-400', statusTitle='שגרה מבורכת', statusSub='לא זוהו איומים במדינה';
-
-    if(status.threat_level==="EMERGENCY"){
-        bgClass='emergency-mode-red';
-        statusBoxClass='bg-red-600 border-white md:border-4 border-2 shadow-[0_0_30px_#ef4444]';
-        statusIcon='fa-radiation text-white animate-spin'; statusTitle='אזעקה מידית!';
-        statusSub=`${status.alert_type} באזור ${status.active_area}`;
-    } else if(status.threat_level==="EARLY_WARNING"){
-        bgClass='emergency-mode-purple';
-        statusBoxClass='bg-purple-800 border-purple-300 md:border-4 border-2 shadow-[0_0_30px_#7c3aed]';
-        statusIcon='fa-clock text-purple-200 animate-pulse'; statusTitle='התרעה מוקדמת';
-        statusSub=`זמן התארגנות מורחב לאזור ${status.active_area}`;
-    } else if(status.threat_level==="CLOSE_THREAT"){
-        bgClass='emergency-mode-orange';
-        statusBoxClass='bg-orange-600 border-white md:border-4 border-2';
-        statusIcon='fa-eye text-white animate-pulse'; statusTitle='מצב עירני';
-        statusSub='שיגורים בקרבתך. הישאר קרוב למרחב מוגן.';
-    } else if(status.threat_level==="PENDING_EVENT"){
-        bgClass='bg-yellow-900';
-        statusBoxClass='bg-yellow-600 border-yellow-400 md:border-4 border-2 shadow-[0_0_30px_#facc15]';
-        statusIcon='fa-hourglass-half text-yellow-100 animate-pulse'; statusTitle='ממתין לסיום אירוע';
-        statusSub=`הישאר במרחב המוגן (${status.active_area})`;
-    }
+    let bgClass='bg-slate-900';
+    let statusBoxClass='bg-slate-800 text-slate-300 border-slate-600';
+    let statusIcon='fa-shield-alt text-blue-400';
+    let statusTitle='שגרה מבורכת';
+    let statusSub='האזן להנחיות פיקוד העורף בעת הצורך';
 
     const hasPendingPolygons = (status.all_alerts||[]).some(a=>a.polygon_type==='PENDING');
-    const hasActivePolygons  = (status.all_alerts||[]).length > 0;
+    const activeAlerts = (status.all_alerts||[]).filter(a=>a.polygon_type==="EMERGENCY"||a.polygon_type==="EARLY_WARNING"||a.polygon_type==="UAV");
+    const pendingCount = (status.all_alerts||[]).filter(a=>a.polygon_type==="PENDING").length;
+
+    if(status.threat_level==="EMERGENCY") {
+        bgClass='emergency-mode-red';
+        statusBoxClass='bg-red-900 border-red-500 shadow-[0_0_30px_#ef4444] text-white';
+        statusIcon='fa-radiation animate-spin text-red-200'; statusTitle='אזעקה פעילה!';
+        statusSub='היכנס מיד למרחב המוגן והישאר בו 10 דקות!';
+    } else if(status.threat_level==="EARLY_WARNING") {
+        bgClass='emergency-mode-purple';
+        statusBoxClass='bg-purple-900 border-purple-500 shadow-[0_0_30px_#a855f7] text-white';
+        statusIcon='fa-clock animate-pulse text-purple-200'; statusTitle='התרעה מוקדמת!';
+        statusSub='איום זוהה ממרחק. יש לך זמן להתארגן. התקדם ברוגע למרחב המוגן.';
+    } else if(status.threat_level==="CLOSE_THREAT") {
+        bgClass='emergency-mode-orange';
+        statusBoxClass='bg-orange-800 border-orange-500 shadow-[0_0_20px_#f97316] text-white';
+        statusIcon='fa-exclamation-triangle text-orange-200 animate-pulse'; statusTitle='שיגורים בקרבתך!';
+        statusSub='הישאר סמוך למרחב מוגן או הכי מוגן שיש. ייתכנו יירוטים קרובים.';
+    } else if(status.threat_level==="PENDING_EVENT") {
+        bgClass='bg-slate-900';
+        statusBoxClass='bg-yellow-600 border-yellow-400 shadow-[0_0_20px_#facc15] text-white';
+        statusIcon='fa-hourglass-half text-yellow-100 animate-pulse'; statusTitle='ממתין לסיום אירוע';
+        statusSub='הישאר במרחב המוגן עד לקבלת אישור סופי!';
+    } else if(status.all_alerts.length>0) {
+        bgClass='bg-slate-900';
+        statusBoxClass='bg-blue-900 border-blue-500 text-white';
+        statusIcon='fa-info-circle text-blue-300'; statusTitle='התרעות פעילות בארץ';
+        statusSub=`ישנן ${activeAlerts.length} התרעות פעילות ברחבי הארץ ` +
+                 (pendingCount>0 ? `וממתין לסיום אירוע (${pendingCount})` : ``);
+    }
 
     return (
         <div className={`fixed inset-0 flex flex-col md:flex-row transition-colors duration-1000 ${bgClass} z-0 overflow-hidden`}>
